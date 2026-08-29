@@ -192,10 +192,18 @@ app.post('/chat', async (req, res) => {
 });
 
 // Static website. `extensions: ['html']` lets /privacy resolve to privacy.html.
+// HTML is served no-cache (revalidate every load) so a deploy's fresh markup —
+// and the versioned asset URLs it references — are picked up immediately.
+// Other assets keep a 1h cache; bump the ?v= query when their contents change.
 app.use(
   express.static(PUBLIC_DIR, {
     extensions: ['html'],
     maxAge: '1h',
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith('.html')) {
+        res.setHeader('Cache-Control', 'no-cache');
+      }
+    },
   })
 );
 
