@@ -543,22 +543,48 @@
   function emailQuote(address) {
     if (!lastQuote) return;
 
-    var lines = (lastQuote.items || []).map(function (it) {
-      var cost = it.low === it.high
-        ? '$' + it.low
-        : '$' + it.low + ' - $' + it.high;
-      return '  • ' + it.description + ': ' + cost;
-    }).join('\n');
+    // Build a readable plain-text estimate from the same breakdown shown in
+    // chat (data.summary), rather than the empty items / $0 totals.
+    function stripMd(s) {
+      return String(s)
+        .replace(/\*\*/g, '')
+        .replace(/(^|[^*])\*([^*]+)\*/g, '$1$2')
+        .replace(/`/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
 
-    var total = lastQuote.total_low === lastQuote.total_high
-      ? '$' + lastQuote.total_low
-      : '$' + lastQuote.total_low + ' - $' + lastQuote.total_high;
+    var srcLines = String(lastQuote.summary || '')
+      .replace(/\[BUTTONS:[^\]]*\]?/ig, '')
+      .replace(/^\s*Would you like[^\n]*$/img, '')
+      .replace(/\r/g, '')
+      .split('\n');
+
+    var out = [];
+    var total = '';
+    srcLines.forEach(function (line) {
+      var t = line.trim();
+      if (!t) { out.push(''); return; }
+      if (/^\|[\s\-:|]+\|?$/.test(t)) return;   // table separator
+      if (/^[-_*]{3,}$/.test(t)) return;         // horizontal rule
+      if (t.charAt(0) === '|') {
+        var cells = splitRow(t).map(stripMd).filter(function (c) { return c.length; });
+        if (cells.length >= 2 && /^item$/i.test(cells[0]) && /^cost$/i.test(cells[1])) return;
+        out.push('  • ' + cells.join(' — '));
+        return;
+      }
+      var clean = stripMd(t.replace(/^#{1,6}\s+/, '').replace(/^[-*•]\s+/, '• '));
+      if (!total && /total/i.test(clean) && clean.indexOf('$') >= 0) {
+        total = clean.slice(clean.indexOf('$')).replace(/[.\s]+$/, '').trim();
+      }
+      out.push(clean);
+    });
+
+    var summaryText = out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 
     var body =
       'Preliminary estimate from ' + BUSINESS.name + '\n\n' +
-      lines + '\n\n' +
-      'TOTAL: ' + total + '\n\n' +
-      '---\n' + (lastQuote.summary || '') + '\n---\n\n' +
+      summaryText + '\n\n' +
       'This is a preliminary range. The final price is confirmed after Issam sees ' +
       'the work in person, and it does not change once agreed.\n\n' +
       BUSINESS.name + ' | ' + BUSINESS.phone + ' | ' + BUSINESS.site;
@@ -568,7 +594,7 @@
       email: address,
       customer_email: address,
       phone: 'Not provided',
-      service: 'Chat estimate — ' + total,
+      service: 'Chat estimate' + (total ? ' — ' + total : ''),
       message: body
     }).then(function () {
       addMessage('bot', '<p>Sent. Check your inbox — and your spam folder just in case.</p>' +
@@ -608,28 +634,119 @@
 
     y += 18;
     doc.setDrawColor(31, 59, 87).setLineWidth(2).line(M, y, W - M, y);
-    y += 28;
+    y += 26;
 
-    doc.setFontSize(9.5).setTextColor(0, 0, 0);
-    (data.items || []).forEach(function (it) {
-      var cost = it.low === it.high ? '$' + it.low : '$' + it.low + ' - $' + it.high;
-      var desc = doc.splitTextToSize(it.description, W - M * 2 - 110);
-      doc.setFont('helvetica', 'normal').text(desc, M, y);
-      doc.setFont('helvetica', 'bold').text(cost, W - M, y, { align: 'right' });
-      y += Math.max(desc.length * 12, 12) + 6;
-      doc.setDrawColor(199, 208, 214).setLineWidth(0.5).line(M, y - 4, W - M, y - 4);
-    });
+    // ----- Render the estimate breakdown from the summary markdown -----
+    // (Same content shown in chat: headings, line items, bullets, total.)
+    var CW = W - M * 2;             // content width
+    var PAGE_BOTTOM = 740;
 
-    y += 10;
-    var total = data.total_low === data.total_high
-      ? '$' + data.total_low
-      : '$' + data.total_low + ' - $' + data.total_high;
-    doc.setFillColor(31, 59, 87).rect(M, y, W - M * 2, 30, 'F');
-    doc.setFont('helvetica', 'bold').setFontSize(11).setTextColor(255, 255, 255);
-    doc.text('TOTAL', M + 12, y + 20);
-    doc.setFontSize(13).text(total, W - M - 12, y + 20, { align: 'right' });
-    y += 52;
+    function ensureSpace(h) {
+      if (y + h > PAGE_BOTTOM) { doc.addPage(); y = 60; }
+    }
+    function stripInline(s) {
+      return String(s)
+        .replace(/\*\*/g, '')
+        .replace(/(^|[^*])\*([^*]+)\*/g, '$1$2')
+        .replace(/`/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
 
+    // Drop the trailing "download as PDF / email" prompt and any button tokens.
+    var body = String(data.summary || '')
+      .replace(/\[BUTTONS:[^\]]*\]?/ig, '')
+      .replace(/^\s*Would you like[^\n]*$/img, '')
+      .replace(/\r/g, '');
+    var lines = body.split('\n');
+    var i = 0;
+
+    while (i < lines.length) {
+      var t = lines[i].trim();
+      if (!t) { i++; continue; }
+
+      // horizontal rule — skip
+      if (/^[-_*]{3,}$/.test(t)) { i++; continue; }
+
+      // table block -> two-column line items
+      if (t.charAt(0) === '|') {
+        while (i < lines.length && lines[i].trim().charAt(0) === '|') {
+          var rowLine = lines[i].trim();
+          i++;
+          if (/^\|[\s\-:|]+\|?$/.test(rowLine)) continue; // separator
+          var parts = splitRow(rowLine);
+          if (!parts.length) continue;
+          var pDesc = parts[0] || '';
+          var pCost = parts.length > 1 ? parts[parts.length - 1] : '';
+          if (/^item$/i.test(pDesc) && /^cost$/i.test(pCost)) continue; // header
+          ensureSpace(20);
+          var dl = doc.splitTextToSize(stripInline(pDesc), CW - 120);
+          doc.setFont('helvetica', 'normal').setFontSize(10).setTextColor(30, 30, 30).text(dl, M, y);
+          if (pCost) {
+            doc.setFont('helvetica', 'bold').setTextColor(46, 92, 63).text(stripInline(pCost), W - M, y, { align: 'right' });
+          }
+          y += Math.max(dl.length * 13, 13) + 6;
+          doc.setDrawColor(224, 228, 224).setLineWidth(0.5).line(M, y - 4, W - M, y - 4);
+        }
+        continue;
+      }
+
+      // total line -> highlighted box (checked before headings)
+      var stripped = stripInline(t);
+      if (/^(estimated |grand |project |total\b)/i.test(stripped) &&
+          /total/i.test(stripped) && stripped.indexOf('$') >= 0) {
+        var totalStr = stripped.slice(stripped.indexOf('$')).replace(/[.\s]+$/, '').trim();
+        ensureSpace(44);
+        y += 6;
+        doc.setFillColor(31, 59, 87).rect(M, y, CW, 30, 'F');
+        doc.setFont('helvetica', 'bold').setFontSize(11).setTextColor(255, 255, 255).text('TOTAL', M + 12, y + 20);
+        doc.setFontSize(13).text(totalStr, W - M - 12, y + 20, { align: 'right' });
+        y += 46;
+        i++;
+        continue;
+      }
+
+      // heading: "# ..." or a standalone bold line
+      if (/^#{1,6}\s+/.test(t) || /^\*\*[^*]+\*\*:?$/.test(t)) {
+        ensureSpace(22);
+        y += 6;
+        var htext = stripInline(t.replace(/^#{1,6}\s+/, ''));
+        var hl = doc.splitTextToSize(htext, CW);
+        doc.setFont('helvetica', 'bold').setFontSize(11).setTextColor(31, 59, 87).text(hl, M, y);
+        y += hl.length * 14 + 4;
+        i++;
+        continue;
+      }
+
+      // bullet
+      if (/^[-*•]\s+/.test(t)) {
+        ensureSpace(15);
+        var bl = doc.splitTextToSize('•  ' + stripInline(t.replace(/^[-*•]\s+/, '')), CW - 8);
+        doc.setFont('helvetica', 'normal').setFontSize(10).setTextColor(40, 40, 40).text(bl, M + 6, y);
+        y += bl.length * 13 + 3;
+        i++;
+        continue;
+      }
+
+      // paragraph — collect until a structural line
+      var para = [];
+      while (i < lines.length) {
+        var pl = lines[i].trim();
+        if (!pl || pl.charAt(0) === '|' || /^[-*•]\s+/.test(pl) ||
+            /^#{1,6}\s+/.test(pl) || /^\*\*[^*]+\*\*:?$/.test(pl) ||
+            /^[-_*]{3,}$/.test(pl)) break;
+        para.push(pl); i++;
+      }
+      if (para.length) {
+        ensureSpace(15);
+        var pl2 = doc.splitTextToSize(stripInline(para.join(' ')), CW);
+        doc.setFont('helvetica', 'normal').setFontSize(10).setTextColor(40, 40, 40).text(pl2, M, y);
+        y += pl2.length * 13 + 6;
+      }
+    }
+
+    y += 8;
+    ensureSpace(60);
     doc.setFont('helvetica', 'italic').setFontSize(8.5).setTextColor(107, 114, 128);
     var note = doc.splitTextToSize(
       'Preliminary range based on the information provided in chat. The final price is confirmed ' +
