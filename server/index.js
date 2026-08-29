@@ -183,8 +183,15 @@ app.post('/chat', async (req, res) => {
     messages,
   });
 
-  // Stop generating (and stop billing) if the client goes away mid-stream.
-  req.on('close', () => stream.abort());
+  // Stop generating (and stop billing) only on a *genuine* client disconnect
+  // mid-stream. We watch the RESPONSE, not the request: on Node the request
+  // emits 'close' as soon as its body is consumed (before we finish streaming),
+  // which previously aborted every reply. The `settled` guard ensures we never
+  // abort once the reply has completed normally.
+  let settled = false;
+  res.on('close', () => {
+    if (!settled) stream.abort();
+  });
 
   try {
     let full = '';
@@ -194,10 +201,12 @@ app.post('/chat', async (req, res) => {
     });
 
     await stream.finalMessage();
+    settled = true;
 
     write({ type: 'done', reply: processReply(full) });
     res.end();
   } catch (err) {
+    settled = true;
     if (res.writableEnded) return; // client aborted — nothing to send
     // Log the full error server-side, and surface a short reason in the
     // response body (the widget still shows a generic message to visitors,
