@@ -131,20 +131,6 @@ function processReply(reply) {
 // Health check (used by Railway + uptime checks)
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
-// Diagnostic — reports whether the running process can see its config,
-// WITHOUT ever exposing the secret. Safe to call publicly; remove later.
-app.get('/debug', (_req, res) => {
-  const key = process.env.ANTHROPIC_API_KEY || '';
-  res.json({
-    hasKey: key.length > 10,
-    keyLooksValid: key.startsWith('sk-ant-'),
-    keyLength: key.length,
-    model: MODEL,
-    modelEnvSet: Boolean(process.env.ANTHROPIC_MODEL),
-    node: process.version,
-  });
-});
-
 app.use(express.json({ limit: '256kb' }));
 
 // ------------------------------------------------------------
@@ -224,17 +210,11 @@ app.post('/chat', async (req, res) => {
   } catch (err) {
     settled = true;
     if (res.writableEnded) return; // client aborted — nothing to send
-    // Log the full error server-side, and surface a short reason in the
-    // response body (the widget still shows a generic message to visitors,
-    // but the reason is readable in the Network tab / via curl for debugging).
+    // Log the full error server-side (status + name + message) so the app log
+    // is the source of truth for debugging; the visitor sees a generic message.
     const status = (err && (err.status || err.statusCode)) || '';
-    const apiMsg = err && err.message ? String(err.message).slice(0, 300) : '';
-    const reason =
-      (status ? status + ' ' : '') +
-      (err && err.name ? err.name : 'Error') +
-      (apiMsg ? ': ' + apiMsg : '');
-    console.error('Chat error:', status, err && err.name, apiMsg);
-    write({ type: 'error', error: 'Chat request failed', reason });
+    console.error('Chat error:', status, err && err.name, err && err.message);
+    write({ type: 'error', error: 'Chat request failed' });
     res.end();
   }
 });
