@@ -124,6 +124,16 @@ function getAnthropic() {
 // formats the phrase instead of emitting it as bare text.
 const ESTIMATE_TRIGGER = /^[\s#>*_-]*\**\s*Generated Preliminary Estimate\**\s*/i;
 
+// A total line that states a dollar amount — the reliable content signal that a
+// reply IS a full estimate, even when the model forgets the trigger phrase
+// (every estimate is required to end with a total range). Must be on one line so
+// a bare "Total" heading without a number doesn't match.
+const TOTAL_LINE = /(^|\n)\s*[*_>#\s-]*\**\s*(?:estimated |grand |project )?total\b[^$\n]*\$\s?[0-9]/i;
+
+function isEstimate(text) {
+  return ESTIMATE_TRIGGER.test(text) || TOTAL_LINE.test(text);
+}
+
 function processReply(reply) {
   const trimmed = reply.trim();
 
@@ -132,7 +142,7 @@ function processReply(reply) {
     return reply;
   }
 
-  if (ESTIMATE_TRIGGER.test(trimmed)) {
+  if (isEstimate(trimmed)) {
     const summary = trimmed.replace(ESTIMATE_TRIGGER, '').trim();
     return JSON.stringify({
       action: 'store_quote',
