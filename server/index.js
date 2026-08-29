@@ -92,8 +92,17 @@ Always include a total range at the end, with the $350 minimum applied if it app
 If the estimate includes a door, include the two-visit cure time line.
 After the estimate ask: "Would you like to download this as a PDF or have it emailed to you?"`;
 
-// One shared client — reads ANTHROPIC_API_KEY from the environment.
-const anthropic = new Anthropic();
+// Build the client lazily from the current environment. Constructing at module
+// load captured the key only as it was at process start; a request-time read is
+// robust to platform variable-injection timing (and re-reads if the key is
+// rotated). The client is cached once a valid key is seen.
+let anthropic = null;
+function getAnthropic() {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return null;
+  if (!anthropic) anthropic = new Anthropic({ apiKey });
+  return anthropic;
+}
 
 // ------------------------------------------------------------
 // PROCESS REPLY — detect the estimate trigger phrase and convert
@@ -176,7 +185,14 @@ app.post('/chat', async (req, res) => {
 
   const write = (obj) => res.write(JSON.stringify(obj) + '\n');
 
-  const stream = anthropic.messages.stream({
+  const client = getAnthropic();
+  if (!client) {
+    console.error('Chat error: ANTHROPIC_API_KEY not set at request time');
+    write({ type: 'error', error: 'Chat request failed', reason: 'ANTHROPIC_API_KEY missing' });
+    return res.end();
+  }
+
+  const stream = client.messages.stream({
     model: MODEL,
     max_tokens: 600,
     system: CHAT_SYSTEM_PROMPT,
