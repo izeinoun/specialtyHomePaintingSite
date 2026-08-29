@@ -90,7 +90,15 @@ Generated Preliminary Estimate
 Then provide the estimate in your natural style using markdown — bold, bullets, tables are all fine.
 Always include a total range at the end, with the $350 minimum applied if it applies.
 If the estimate includes a door, include the two-visit cure time line.
-After the estimate ask: "Would you like to download this as a PDF or have it emailed to you?"`;
+
+PDF / EMAIL — CRITICAL, YOU CANNOT DO THIS YOURSELF:
+After every estimate, action buttons appear right below your message: "Email me this quote",
+"Download PDF", and "Call Issam". You have NO ability to send email, generate a PDF, or deliver
+anything — those buttons do it. So:
+- End the estimate with: "Use the buttons just below to download a PDF or have it emailed to you."
+- NEVER ask the customer for their email address.
+- NEVER say you have emailed, sent, or delivered anything — you can't. Only the button can.
+If the customer asks you to email it, point them to the "Email me this quote" button below.`;
 
 // Build the client lazily from the current environment. Constructing at module
 // load captured the key only as it was at process start; a request-time read is
