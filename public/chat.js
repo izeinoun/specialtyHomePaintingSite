@@ -19,9 +19,9 @@
   'use strict';
 
   // ----------------------------------------------------------
-  // CONFIG — paste your existing Apps Script /exec URL here
+  // CONFIG — chat now runs on our own Railway server (same origin).
   // ----------------------------------------------------------
-  var CHAT_PROXY_URL = 'https://script.google.com/macros/s/AKfycbyZCf0ehuHg8tuCnSVnUJNxw0oKwzoXOGO6N_M0Uhr4y6UQeMXYeZb8obO4zMqa6F2h4g/exec';
+  var CHAT_PROXY_URL = '/chat';
   var QUOTE_SHEETS_URL = 'https://script.google.com/macros/s/AKfycbwW4JaSlvo28cA2AjVDvCgUZX5aFUxoW6DSX0qndfN_Jm2VmSEcqWzbM_KPzadVw6G2/exec';
 
   var EMAILJS_SERVICE  = 'service_s9zggu9';
@@ -306,11 +306,14 @@
 
     showTyping();
 
-    var url = CHAT_PROXY_URL +
-      '?message=' + encodeURIComponent(text) +
-      '&history=' + encodeURIComponent(encodeURIComponent(JSON.stringify(history.slice(0, -1))));
-
-    fetch(url)
+    fetch(CHAT_PROXY_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: text,
+        history: history.slice(0, -1)
+      })
+    })
       .then(function (r) { return r.json(); })
       .then(function (data) {
         hideTyping();
