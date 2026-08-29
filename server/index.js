@@ -84,7 +84,8 @@ QUICK BUTTONS — suggest when helpful using EXACTLY this format on its own line
 [BUTTONS: option1 | option2 | option3]
 
 ESTIMATE INSTRUCTIONS — CRITICAL:
-When you have enough info to calculate an estimate, ALWAYS start your response with exactly this phrase on its own line:
+When you have enough info to calculate an estimate, ALWAYS make the FIRST line of your response
+exactly this phrase, as plain text — no bold, no heading (#), no markdown around it, nothing before it:
 Generated Preliminary Estimate
 
 Then provide the estimate in your natural style using markdown — bold, bullets, tables are all fine.
@@ -117,6 +118,12 @@ function getAnthropic() {
 // it to the store_quote action the chat widget renders with the
 // PDF / email / call buttons. Otherwise return the text as-is.
 // ------------------------------------------------------------
+// Matches the estimate trigger at the very start of the reply, tolerant of
+// leading markdown the model may add (heading "##", bold "**", blockquote ">",
+// list dashes) and of casing — so the buttons render even when the model
+// formats the phrase instead of emitting it as bare text.
+const ESTIMATE_TRIGGER = /^[\s#>*_-]*\**\s*Generated Preliminary Estimate\**\s*/i;
+
 function processReply(reply) {
   const trimmed = reply.trim();
 
@@ -125,8 +132,8 @@ function processReply(reply) {
     return reply;
   }
 
-  if (trimmed.startsWith('Generated Preliminary Estimate')) {
-    const summary = trimmed.replace('Generated Preliminary Estimate', '').trim();
+  if (ESTIMATE_TRIGGER.test(trimmed)) {
+    const summary = trimmed.replace(ESTIMATE_TRIGGER, '').trim();
     return JSON.stringify({
       action: 'store_quote',
       data: { summary, items: [], total_low: 0, total_high: 0 },

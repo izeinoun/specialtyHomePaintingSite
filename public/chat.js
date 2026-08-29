@@ -317,7 +317,8 @@
   // ----------------------------------------------------------
   function cleanPreview(text) {
     return String(text)
-      .replace(/^Generated Preliminary Estimate\s*/, '')
+      // strip the estimate trigger even if wrapped in markdown (##, **, >)
+      .replace(/^[\s#>*_-]*\**\s*Generated Preliminary Estimate\**\s*/i, '')
       .replace(/\[BUTTONS:[^\]]*\]?/i, '')
       .replace(/^\s+/, '');
   }
