@@ -306,33 +306,113 @@
 
     showTyping();
 
+    streamChat(text);
+  }
+
+  // ----------------------------------------------------------
+  // STREAMING
+  // Reads an NDJSON stream ({type:delta|done|error}). Deltas render
+  // as a plain-text live preview; the final formatted render (markdown,
+  // estimate buttons, quote) happens once from the `done` reply.
+  // ----------------------------------------------------------
+  function cleanPreview(text) {
+    return String(text)
+      .replace(/^Generated Preliminary Estimate\s*/, '')
+      .replace(/\[BUTTONS:[^\]]*\]?/i, '')
+      .replace(/^\s+/, '');
+  }
+
+  function botError(msg) {
+    addMessage('bot', '<p>' + msg + ' Call or text Issam at <a href="tel:' +
+      BUSINESS.tel + '">' + BUSINESS.phone + '</a>.</p>');
+  }
+
+  function streamChat(text) {
+    var previewBubble = null;   // live-updating bubble element
+    var acc = '';               // accumulated raw text (for fallback)
+    var finished = false;       // a done/error event was handled
+
+    function ensurePreview() {
+      if (previewBubble) return;
+      hideTyping();
+      var wrap = addMessage('bot', '', { noTime: true });
+      previewBubble = wrap.querySelector('.msg-bubble');
+      previewBubble.style.whiteSpace = 'pre-wrap';
+      previewBubble.parentNode.dataset.preview = '1';
+    }
+
+    function removePreview() {
+      if (previewBubble && previewBubble.parentNode) {
+        previewBubble.parentNode.remove();
+      }
+      previewBubble = null;
+    }
+
+    function handleEvent(evt) {
+      if (!evt || !evt.type) return;
+      if (evt.type === 'delta') {
+        ensurePreview();
+        acc += evt.text || '';
+        previewBubble.textContent = cleanPreview(acc);
+        scrollDown();
+      } else if (evt.type === 'done') {
+        finished = true;
+        removePreview();
+        var reply = evt.reply || acc;
+        if (reply && reply.trim()) {
+          handleReply(reply);
+        } else {
+          botError('Sorry — something went wrong on my end.');
+        }
+      } else if (evt.type === 'error') {
+        finished = true;
+        removePreview();
+        botError('Sorry — something went wrong on my end.');
+        console.error('Chat stream error:', evt.error);
+      }
+    }
+
     fetch(CHAT_PROXY_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: text,
-        history: history.slice(0, -1)
-      })
+      body: JSON.stringify({ message: text, history: history.slice(0, -1) })
     })
-      .then(function (r) { return r.json(); })
-      .then(function (data) {
-        hideTyping();
-        busy = false;
-        if (data && data.success && data.reply) {
-          handleReply(data.reply);
-        } else {
-          addMessage('bot', '<p>Sorry — something went wrong on my end. ' +
-            'Call or text Issam at <a href="tel:' + BUSINESS.tel + '">' +
-            BUSINESS.phone + '</a> and he\'ll get right back to you.</p>');
-          console.error('Chat error:', data);
+      .then(function (resp) {
+        if (!resp.ok || !resp.body) {
+          throw new Error('HTTP ' + resp.status);
         }
+        var reader = resp.body.getReader();
+        var decoder = new TextDecoder();
+        var buffer = '';
+
+        function pump() {
+          return reader.read().then(function (result) {
+            if (result.done) {
+              // flush any trailing line
+              var last = buffer.trim();
+              if (last) { try { handleEvent(JSON.parse(last)); } catch (e) {} }
+              if (!finished) { removePreview(); botError('The connection dropped.'); }
+              busy = false;
+              return;
+            }
+            buffer += decoder.decode(result.value, { stream: true });
+            var idx;
+            while ((idx = buffer.indexOf('\n')) >= 0) {
+              var line = buffer.slice(0, idx);
+              buffer = buffer.slice(idx + 1);
+              if (!line.trim()) continue;
+              try { handleEvent(JSON.parse(line)); } catch (e) { /* partial/garbage */ }
+            }
+            return pump();
+          });
+        }
+        return pump();
       })
       .catch(function (err) {
         hideTyping();
+        removePreview();
         busy = false;
-        addMessage('bot', '<p>I couldn\'t reach the server. ' +
-          'Call or text Issam at <a href="tel:' + BUSINESS.tel + '">' +
-          BUSINESS.phone + '</a>.</p>');
+        if (!finished) botError('I couldn\'t reach the server.');
         console.error('Chat fetch failed:', err);
       });
   }

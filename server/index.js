@@ -125,51 +125,69 @@ app.get('/healthz', (_req, res) => res.json({ ok: true }));
 app.use(express.json({ limit: '256kb' }));
 
 // ------------------------------------------------------------
-// POST /chat — { message, history } -> { success, reply }
+// POST /chat — { message, history } -> NDJSON stream of events:
+//   {"type":"delta","text":"..."}   incremental assistant text
+//   {"type":"done","reply":"..."}    final reply (post-processed)
+//   {"type":"error","error":"..."}   failure (may arrive mid-stream)
+//
+// The client renders deltas as a live preview, then does the
+// definitive render (estimate buttons, markdown) from `done.reply`.
 // history is an array of prior { role, content } turns.
 // ------------------------------------------------------------
 app.post('/chat', async (req, res) => {
+  const { message, history } = req.body || {};
+
+  // Validate before opening the stream so we can still send a clean 400.
+  if (typeof message !== 'string' || !message.trim()) {
+    return res.status(400).json({ success: false, error: 'message is required' });
+  }
+
+  // Keep only well-formed prior turns; cap history to bound token cost.
+  const priorTurns = Array.isArray(history)
+    ? history
+        .filter(
+          (m) =>
+            m &&
+            (m.role === 'user' || m.role === 'assistant') &&
+            typeof m.content === 'string'
+        )
+        .slice(-10)
+    : [];
+
+  const messages = [...priorTurns, { role: 'user', content: message }];
+
+  res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('X-Accel-Buffering', 'no'); // disable proxy buffering
+
+  const write = (obj) => res.write(JSON.stringify(obj) + '\n');
+
+  const stream = anthropic.messages.stream({
+    model: MODEL,
+    max_tokens: 600,
+    system: CHAT_SYSTEM_PROMPT,
+    messages,
+  });
+
+  // Stop generating (and stop billing) if the client goes away mid-stream.
+  req.on('close', () => stream.abort());
+
   try {
-    const { message, history } = req.body || {};
-
-    if (typeof message !== 'string' || !message.trim()) {
-      return res.status(400).json({ success: false, error: 'message is required' });
-    }
-
-    // Keep only well-formed prior turns; cap history to bound token cost.
-    const priorTurns = Array.isArray(history)
-      ? history
-          .filter(
-            (m) =>
-              m &&
-              (m.role === 'user' || m.role === 'assistant') &&
-              typeof m.content === 'string'
-          )
-          .slice(-10)
-      : [];
-
-    const messages = [...priorTurns, { role: 'user', content: message }];
-
-    const response = await anthropic.messages.create({
-      model: MODEL,
-      max_tokens: 600,
-      system: CHAT_SYSTEM_PROMPT,
-      messages,
+    let full = '';
+    stream.on('text', (delta) => {
+      full += delta;
+      write({ type: 'delta', text: delta });
     });
 
-    const rawReply = response.content
-      .filter((block) => block.type === 'text')
-      .map((block) => block.text)
-      .join('');
+    await stream.finalMessage();
 
-    if (!rawReply) {
-      return res.status(502).json({ success: false, error: 'Empty response from model' });
-    }
-
-    return res.json({ success: true, reply: processReply(rawReply) });
+    write({ type: 'done', reply: processReply(full) });
+    res.end();
   } catch (err) {
+    if (res.writableEnded) return; // client aborted — nothing to send
     console.error('Chat error:', err);
-    return res.status(500).json({ success: false, error: 'Chat request failed' });
+    write({ type: 'error', error: 'Chat request failed' });
+    res.end();
   }
 });
 
