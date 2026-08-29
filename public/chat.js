@@ -374,6 +374,27 @@
       }
     }
 
+    // Parse one NDJSON line and dispatch it. JSON parse failures are skipped
+    // (partial/garbage line); errors thrown INSIDE handleEvent are logged with
+    // a full stack so the calling routine and line are visible — never swallowed.
+    function dispatchLine(line) {
+      var evt;
+      try {
+        evt = JSON.parse(line);
+      } catch (parseErr) {
+        console.warn('Chat: skipping non-JSON line:', line);
+        return;
+      }
+      try {
+        handleEvent(evt);
+      } catch (handlerErr) {
+        console.error(
+          'Chat: handleEvent threw for event', evt, '\n',
+          handlerErr && handlerErr.stack ? handlerErr.stack : handlerErr
+        );
+      }
+    }
+
     fetch(CHAT_PROXY_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -392,7 +413,7 @@
             if (result.done) {
               // flush any trailing line
               var last = buffer.trim();
-              if (last) { try { handleEvent(JSON.parse(last)); } catch (e) {} }
+              if (last) dispatchLine(last);
               if (!finished) { removePreview(); botError('The connection dropped.'); }
               busy = false;
               return;
@@ -402,8 +423,7 @@
             while ((idx = buffer.indexOf('\n')) >= 0) {
               var line = buffer.slice(0, idx);
               buffer = buffer.slice(idx + 1);
-              if (!line.trim()) continue;
-              try { handleEvent(JSON.parse(line)); } catch (e) { /* partial/garbage */ }
+              if (line.trim()) dispatchLine(line);
             }
             return pump();
           });
