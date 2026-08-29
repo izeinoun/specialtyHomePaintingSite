@@ -367,8 +367,10 @@
       } else if (evt.type === 'error') {
         finished = true;
         removePreview();
-        botError('Sorry — something went wrong on my end.');
-        console.error('Chat stream error:', evt.error);
+        // TEMP DEBUG: surface the real reason in the bubble.
+        var detail = evt.reason ? ' [' + escapeHtml(String(evt.reason)) + ']' : '';
+        botError('Sorry — something went wrong on my end.' + detail);
+        console.error('Chat stream error:', evt.error, evt.reason);
       }
     }
 

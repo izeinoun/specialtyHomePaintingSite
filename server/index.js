@@ -202,11 +202,13 @@ app.post('/chat', async (req, res) => {
     // Log the full error server-side, and surface a short reason in the
     // response body (the widget still shows a generic message to visitors,
     // but the reason is readable in the Network tab / via curl for debugging).
+    const status = (err && (err.status || err.statusCode)) || '';
+    const apiMsg = err && err.message ? String(err.message).slice(0, 300) : '';
     const reason =
-      (err && (err.status || err.statusCode)
-        ? (err.status || err.statusCode) + ' '
-        : '') + (err && (err.name || 'Error'));
-    console.error('Chat error:', err && err.status, err && err.name, err && err.message);
+      (status ? status + ' ' : '') +
+      (err && err.name ? err.name : 'Error') +
+      (apiMsg ? ': ' + apiMsg : '');
+    console.error('Chat error:', status, err && err.name, apiMsg);
     write({ type: 'error', error: 'Chat request failed', reason });
     res.end();
   }
