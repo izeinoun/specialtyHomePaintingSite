@@ -25,7 +25,8 @@
   var QUOTE_SHEETS_URL = 'https://script.google.com/macros/s/AKfycbwW4JaSlvo28cA2AjVDvCgUZX5aFUxoW6DSX0qndfN_Jm2VmSEcqWzbM_KPzadVw6G2/exec';
 
   var EMAILJS_SERVICE  = 'service_s9zggu9';
-  var EMAILJS_TEMPLATE = 'template_yrs9zfk';
+  var EMAILJS_TEMPLATE = 'template_yrs9zfk';       // contact-form template (to business)
+  var EMAILJS_QUOTE_TEMPLATE = 'template_66n8bpb'; // quote template: To={{email}} (customer), Bcc business
 
   var BUSINESS = {
     name:  'Specialty Home Painting',
@@ -588,7 +589,7 @@
       'the work in person, and it does not change once agreed.\n\n' +
       BUSINESS.name + ' | ' + BUSINESS.phone + ' | ' + BUSINESS.site;
 
-    emailjs.send(EMAILJS_SERVICE, EMAILJS_TEMPLATE, {
+    emailjs.send(EMAILJS_SERVICE, EMAILJS_QUOTE_TEMPLATE, {
       name: 'Website chat visitor',
       email: address,
       customer_email: address,
