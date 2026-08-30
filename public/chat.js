@@ -458,6 +458,18 @@
     }).join('\n\n');
   }
 
+  // Fire-and-forget: tell the server to text Issam that an email went out.
+  // Server sends the SMS via Telnyx (dormant until configured in Railway).
+  function notifySms(kind, to, total) {
+    try {
+      fetch('/notify-sms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: kind, to: to, total: total || '' })
+      }).catch(function () {});
+    } catch (e) { /* non-fatal */ }
+  }
+
   function emailQuote(address) {
     if (!lastQuote) return;
     var q = lastQuote;
@@ -484,6 +496,7 @@
       service: 'Chat estimate — ' + total,
       message: body
     }).then(function () {
+      notifySms('quote', address, total);
       addMessage('bot', '<p>Sent. Check your inbox — and your spam folder just in case.</p>' +
         '<p>Issam will follow up shortly. You can reach him directly at <a href="tel:' +
         BUSINESS.tel + '">' + BUSINESS.phone + '</a>.</p>');
@@ -518,6 +531,7 @@
       service: 'Chat lead — visitor wants a callback',
       message: body
     }).then(function () {
+      notifySms('lead', address, lastQuote ? money(lastQuote.total_low, lastQuote.total_high) : '');
       addMessage('bot', '<p>Got it — I\'ve passed your details to Issam. He\'ll reach out soon. ' +
         'You can also call or text him at <a href="tel:' + BUSINESS.tel + '">' + BUSINESS.phone + '</a>.</p>');
     }).catch(function (err) {

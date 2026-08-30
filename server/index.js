@@ -38,6 +38,51 @@ function getAnthropic() {
   return anthropic;
 }
 
+// ------------------------------------------------------------
+// Telnyx SMS alerts — text Issam whenever a chat email is sent.
+// Configure in Railway: TELNYX_API_KEY, TELNYX_FROM_NUMBER (an
+// SMS-enabled Telnyx number, E.164), ALERT_SMS_TO (Issam's cell, E.164).
+// Dormant/no-op until all three are set. Destination is fixed to
+// ALERT_SMS_TO and the message is built server-side, so the public
+// endpoint can only ever text Issam (rate-limited below).
+// ------------------------------------------------------------
+const smsConfigured = () =>
+  process.env.TELNYX_API_KEY && process.env.TELNYX_FROM_NUMBER && process.env.ALERT_SMS_TO;
+
+// Simple fixed-window rate limit to bound abuse/cost.
+let smsWinStart = 0;
+let smsWinCount = 0;
+function smsAllowed() {
+  const now = Date.now();
+  if (now - smsWinStart > 60000) { smsWinStart = now; smsWinCount = 0; }
+  if (smsWinCount >= 10) return false;
+  smsWinCount += 1;
+  return true;
+}
+
+function smsField(s, max) {
+  return String(s || '').replace(/[\r\n]+/g, ' ').trim().slice(0, max || 80);
+}
+
+async function sendTelnyxSms(text) {
+  const r = await fetch('https://api.telnyx.com/v2/messages', {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer ' + process.env.TELNYX_API_KEY,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: process.env.TELNYX_FROM_NUMBER,
+      to: process.env.ALERT_SMS_TO,
+      text,
+    }),
+  });
+  if (!r.ok) {
+    const body = await r.text().catch(() => '');
+    throw new Error('Telnyx ' + r.status + ': ' + body.slice(0, 300));
+  }
+}
+
 // Health check (used by Railway + uptime checks)
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
@@ -116,6 +161,37 @@ app.post('/chat', async (req, res) => {
     console.error('Chat error:', status, err && err.name, err && err.message);
     write({ type: 'error', error: 'Chat request failed' });
     res.end();
+  }
+});
+
+// ------------------------------------------------------------
+// POST /notify-sms — texts Issam that a chat email was sent.
+// Body: { kind: "quote"|"lead", to: <recipient email>, total?: <string> }
+// The server composes the message and always sends to ALERT_SMS_TO.
+// ------------------------------------------------------------
+app.post('/notify-sms', async (req, res) => {
+  if (!smsConfigured()) return res.json({ ok: false, skipped: 'sms not configured' });
+  if (!smsAllowed()) return res.status(429).json({ ok: false, error: 'rate limited' });
+
+  const { kind, to, total } = req.body || {};
+  const who = smsField(to, 120);
+  const amt = smsField(total, 40);
+
+  let text;
+  if (kind === 'lead') {
+    text = 'Specialty Home Painting: new chat lead — ' + (who || 'a visitor') +
+      ' wants a callback' + (amt ? ' (' + amt + ')' : '') + '.';
+  } else {
+    text = 'Specialty Home Painting: estimate emailed to ' + (who || 'a customer') +
+      (amt ? ' — ' + amt : '') + '.';
+  }
+
+  try {
+    await sendTelnyxSms(text);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('SMS notify error:', err && err.message);
+    res.status(502).json({ ok: false });
   }
 });
 
