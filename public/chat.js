@@ -451,9 +451,11 @@
 
   function quoteLinesText(q) {
     return (q.line_items || []).map(function (li) {
-      return '  • ' + li.description + ': ' + money(li.low, li.high) +
+      var line = '  • ' + li.description + ': ' + money(li.low, li.high) +
         (li.note ? ' (' + li.note + ')' : '');
-    }).join('\n');
+      if (li.detail) line += '\n      ' + li.detail;
+      return line;
+    }).join('\n\n');
   }
 
   function emailQuote(address) {
@@ -554,15 +556,23 @@
     doc.setDrawColor(31, 59, 87).setLineWidth(2).line(M, y, W - M, y);
     y += 26;
 
-    // Line items
+    // Line items — description (with cost), then a "what's included" detail.
     (q.line_items || []).forEach(function (li) {
       var cost = money(li.low, li.high);
-      var desc = li.description + (li.note ? '  (' + li.note + ')' : '');
-      ensureSpace(20);
-      var dl = doc.splitTextToSize(desc, CW - 120);
-      doc.setFont('helvetica', 'normal').setFontSize(10).setTextColor(30, 30, 30).text(dl, M, y);
-      doc.setFont('helvetica', 'bold').setTextColor(46, 92, 63).text(cost, W - M, y, { align: 'right' });
-      y += Math.max(dl.length * 13, 13) + 6;
+      ensureSpace(26);
+      var dl = doc.splitTextToSize(li.description, CW - 120);
+      doc.setFont('helvetica', 'bold').setFontSize(10.5).setTextColor(31, 59, 87).text(dl, M, y);
+      doc.setFont('helvetica', 'bold').setFontSize(10).setTextColor(46, 92, 63).text(cost, W - M, y, { align: 'right' });
+      y += dl.length * 13 + 2;
+
+      var extra = (li.detail || '') + (li.note ? ' ' + li.note : '');
+      if (extra.trim()) {
+        ensureSpace(14);
+        var el = doc.splitTextToSize(extra.trim(), CW);
+        doc.setFont('helvetica', 'normal').setFontSize(8.5).setTextColor(110, 110, 110).text(el, M, y);
+        y += el.length * 11;
+      }
+      y += 8;
       doc.setDrawColor(224, 228, 224).setLineWidth(0.5).line(M, y - 4, W - M, y - 4);
     });
 

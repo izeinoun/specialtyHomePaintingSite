@@ -102,6 +102,12 @@ export function calculateQuote(params) {
   const lineItems = [];
   let hasDoor = false;
 
+  const ROOM_DETAIL = {
+    good: 'Light prep, spot-priming as needed, and two finish coats on the walls. Minor drywall patches included.',
+    fair: 'Patching, sanding, and spot-priming to smooth out imperfections, then two finish coats. Minor drywall patches included.',
+    bad: 'Heavier repair — filling, sanding, and feathering damaged areas into the wall — then priming and two finish coats. Minor drywall patches included.',
+  };
+
   rooms.forEach((r) => {
     const size = norm(r.size);
     const condition = norm(r.condition);
@@ -111,17 +117,28 @@ export function calculateQuote(params) {
     const [rl, rh] = ROOM_RATES[size][condition];
     lineItems.push({
       description: titadel(size) + ' room — ' + condition + ' condition' + suffix,
+      detail: ROOM_DETAIL[condition],
       low: rl * n,
       high: rh * n,
     });
 
     if (r.ceiling) {
       const [cl, ch] = CEILING_RATES[size];
-      lineItems.push({ description: 'Ceiling (' + size + ')' + suffix, low: cl * n, high: ch * n });
+      lineItems.push({
+        description: 'Ceiling (' + size + ')' + suffix,
+        detail: 'Flat ceiling finish — cut in around edges and rolled.',
+        low: cl * n,
+        high: ch * n,
+      });
     }
     if (r.trim) {
       const [tl, th] = TRIM_RATES[size];
-      lineItems.push({ description: 'Trim & baseboards (' + size + ')' + suffix, low: tl * n, high: th * n });
+      lineItems.push({
+        description: 'Trim & baseboards (' + size + ')' + suffix,
+        detail: 'Baseboards, door casings, and window trim — prepped and finished in enamel with clean, controlled lines.',
+        low: tl * n,
+        high: th * n,
+      });
     }
   });
 
@@ -130,9 +147,15 @@ export function calculateQuote(params) {
     const condition = norm(d.condition);
     const n = qty(d.quantity);
     const suffix = n > 1 ? ' (×' + n + ')' : '';
+    const detail = {
+      good: 'Scuff-sand and two coats for a clean, even finish; door rehung when dry.',
+      fair: 'Fill scratches and minor chips, sand, prime, then two coats; door rehung when dry.',
+      bad: 'Repair peeling, gouges, and damaged areas first, then prime and two coats; door rehung when dry.',
+    }[condition];
     const [dl, dh] = INTERIOR_DOOR_RATES[condition];
     lineItems.push({
       description: 'Interior door — ' + condition + ' condition' + suffix,
+      detail: detail,
       low: dl * n,
       high: dh * n,
     });
@@ -144,13 +167,13 @@ export function calculateQuote(params) {
     const suffix = n > 1 ? ' (×' + n + ')' : '';
     const top = Boolean(d && (d.oversized || d.sidelight));
     const [el, eh] = top ? EXTERIOR_DOOR_TOP : EXTERIOR_DOOR_BASE;
-    const note = top ? 'Priced toward the top of the range (oversized or sidelight).' : undefined;
     const item = {
       description: 'Front / exterior door restoration' + suffix,
+      detail: 'On-site restoration: surface and scratch repair, peeling-paint prep, priming, and two coats of durable alkyd enamel. Spans two visits (overnight cure between coats); rehang and hardware reinstall included.',
       low: el * n,
       high: eh * n,
     };
-    if (note) item.note = note;
+    if (top) item.note = 'Priced toward the top of the range (oversized or sidelight).';
     lineItems.push(item);
   });
 
