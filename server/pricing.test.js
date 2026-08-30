@@ -111,3 +111,47 @@ test('null / undefined params do not throw', () => {
   assert.equal(calculateQuote(undefined).status, 'need_info');
   assert.equal(calculateQuote(null).status, 'need_info');
 });
+
+// ---- expanded catalog: windows, railings, crown, French doors ----
+
+test('windows price by condition', () => {
+  const q = calculateQuote({ windows: [{ condition: 'fair', quantity: 3 }] });
+  // 3 x 90-140
+  assert.deepEqual([q.line_items[0].low, q.line_items[0].high], [270, 420]);
+  assert.match(q.line_items[0].description, /window/i);
+});
+
+test('banister / railing prices by condition', () => {
+  const q = calculateQuote({ railings: [{ condition: 'bad' }] });
+  assert.deepEqual([q.line_items[0].low, q.line_items[0].high], [400, 575]);
+  assert.match(q.line_items[0].description, /banister|railing/i);
+});
+
+test('crown molding add-on on a room', () => {
+  const q = calculateQuote({ rooms: [{ size: 'medium', condition: 'good', crown: true }] });
+  assert.equal(q.line_items.length, 2); // room + crown
+  // 250-300 + 110-150
+  assert.deepEqual([q.total_low, q.total_high], [360, 450]);
+  assert.match(q.line_items[1].description, /crown/i);
+});
+
+test('interior French door costs more than a standard interior door', () => {
+  const std = calculateQuote({ interior_doors: [{ condition: 'fair' }] });
+  const fr = calculateQuote({ interior_doors: [{ condition: 'fair', french: true }] });
+  assert.deepEqual([std.line_items[0].low, std.line_items[0].high], [160, 200]);
+  assert.deepEqual([fr.line_items[0].low, fr.line_items[0].high], [340, 430]);
+  assert.match(fr.line_items[0].description, /french/i);
+  assert.equal(fr.has_door, true);
+});
+
+test('exterior French door uses the premium range', () => {
+  const q = calculateQuote({ exterior_doors: [{ french: true }] });
+  assert.deepEqual([q.total_low, q.total_high], [900, 1300]);
+  assert.match(q.line_items[0].description, /french/i);
+});
+
+test('window missing condition -> need_info', () => {
+  const q = calculateQuote({ windows: [{ quantity: 2 }] });
+  assert.equal(q.status, 'need_info');
+  assert.ok(q.missing.some((m) => m.field === 'condition'));
+});

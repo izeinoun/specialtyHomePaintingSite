@@ -23,16 +23,19 @@ const PHONE = '(904) 514-7016';
 const EXTRACTOR_SYSTEM = `You extract structured quote parameters from a conversation between a customer and a painting company's assistant. You DO NOT talk to the customer and you DO NOT compute prices. You only output JSON matching the schema: the COMPLETE current parameter picture (reflecting the ENTIRE conversation so far, not just the last message) plus the customer's intent.
 
 What we can price (the catalog):
-- Interior rooms: size (small/medium/large) × condition (good/fair/bad), with optional ceiling and trim/baseboard add-ons. Bedrooms are medium size unless stated. "No mention of ceiling/trim" means not included (false).
-- Interior doors: condition (good/fair/bad).
-- Front / exterior doors: quantity, whether oversized, whether it has a sidelight.
+- Interior rooms: size (small/medium/large) × condition (good/fair/bad), with optional ceiling, trim/baseboard, and crown-molding add-ons. Bedrooms are medium size unless stated. "No mention of ceiling/trim/crown" means not included (false).
+- Interior doors: condition (good/fair/bad); set french=true for French doors (doors with glass panes/panels/muntins) — they cost more.
+- Front / exterior doors: quantity, whether oversized, whether it has a sidelight, and french (French/glass-pane doors cost more).
+- Windows (woodwork + trim): condition (good/fair/bad).
+- Banisters / railings (handrail, balusters/spindles, newel posts): condition (good/fair/bad).
 
 Rules:
 - Merge everything said so far into one complete params object.
-- If a room's size or condition has not been stated, use "unknown" — never guess condition. (Bedrooms may default to medium size, but condition stays "unknown" until stated.)
-- ceiling, trim, oversized, sidelight default to false; quantity defaults to 1.
-- IN THE CATALOG (always priceable — never out_of_scope, never talk_to_human): interior room painting, ceilings, trim/baseboards, interior doors, and front/exterior doors. A generic "door restoration" or "interior painting" is IN the catalog — do not hand it off; just keep gathering (e.g. for doors, find out whether they're interior or front/exterior).
-- out_of_scope is ONLY for work we genuinely cannot price from that catalog: large drywall repair needing a photo, whole-house or exterior wall/siding painting, cabinets, popcorn-ceiling removal, staining, or clearly unusual requests. When unsure, prefer "gather" over out_of_scope.
+- If a room's size or condition has not been stated, use "unknown" — never guess condition. (Bedrooms may default to medium size, but condition stays "unknown" until stated.) Windows and railings also need a condition (good/fair/bad); use "unknown" until stated.
+- ceiling, trim, crown, oversized, sidelight, french default to false; quantity defaults to 1.
+- Set french=true when the customer says "French door(s)" or describes a door with glass panes/panels/muntins/lites. Crown molding => the room's crown=true. "Window trim/casings/woodwork" => a windows entry. "Banister/railing/handrail/balusters/spindles/newel" => a railings entry.
+- IN THE CATALOG (always priceable — never out_of_scope, never talk_to_human): interior room painting, ceilings, trim/baseboards, crown molding, interior doors, front/exterior doors, French doors, windows (trim/woodwork), and banisters/railings. A generic "door restoration" or "interior painting" is IN the catalog — do not hand it off; just keep gathering (e.g. for doors, find out whether they're interior or front/exterior).
+- out_of_scope is ONLY for work we genuinely cannot price from that catalog: large drywall repair needing a photo, whole-house or exterior wall/siding painting, cabinets, shutters, popcorn-ceiling removal, staining, or clearly unusual requests. When unsure, prefer "gather" over out_of_scope.
 - intent:
   - "gather" — still collecting quote details (the default for any catalog work).
   - "answer" — the customer asked a question about our work, process, paint, doors, warranty, scheduling, etc.
@@ -57,24 +60,52 @@ const EXTRACTOR_SCHEMA = {
     params: {
       type: 'object',
       additionalProperties: false,
-      required: ['rooms', 'interior_doors', 'exterior_doors', 'out_of_scope'],
+      required: ['rooms', 'interior_doors', 'exterior_doors', 'windows', 'railings', 'out_of_scope'],
       properties: {
         rooms: {
           type: 'array',
           items: {
             type: 'object',
             additionalProperties: false,
-            required: ['size', 'condition', 'ceiling', 'trim', 'quantity'],
+            required: ['size', 'condition', 'ceiling', 'trim', 'crown', 'quantity'],
             properties: {
               size: { type: 'string', enum: ENUM_SIZE },
               condition: { type: 'string', enum: ENUM_COND },
               ceiling: { type: 'boolean' },
               trim: { type: 'boolean' },
+              crown: { type: 'boolean' },
               quantity: { type: 'integer' },
             },
           },
         },
         interior_doors: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['condition', 'french', 'quantity'],
+            properties: {
+              condition: { type: 'string', enum: ENUM_COND },
+              french: { type: 'boolean' },
+              quantity: { type: 'integer' },
+            },
+          },
+        },
+        exterior_doors: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['quantity', 'oversized', 'sidelight', 'french'],
+            properties: {
+              quantity: { type: 'integer' },
+              oversized: { type: 'boolean' },
+              sidelight: { type: 'boolean' },
+              french: { type: 'boolean' },
+            },
+          },
+        },
+        windows: {
           type: 'array',
           items: {
             type: 'object',
@@ -86,16 +117,15 @@ const EXTRACTOR_SCHEMA = {
             },
           },
         },
-        exterior_doors: {
+        railings: {
           type: 'array',
           items: {
             type: 'object',
             additionalProperties: false,
-            required: ['quantity', 'oversized', 'sidelight'],
+            required: ['condition', 'quantity'],
             properties: {
+              condition: { type: 'string', enum: ENUM_COND },
               quantity: { type: 'integer' },
-              oversized: { type: 'boolean' },
-              sidelight: { type: 'boolean' },
             },
           },
         },
