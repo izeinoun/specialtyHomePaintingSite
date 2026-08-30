@@ -83,8 +83,16 @@ async function sendTelnyxSms(text) {
   }
 }
 
-// Health check (used by Railway + uptime checks)
-app.get('/healthz', (_req, res) => res.json({ ok: true }));
+// Health check (used by Railway + uptime checks). Also reports whether the
+// running process can see its Telnyx SMS vars — booleans only, no secrets.
+app.get('/healthz', (_req, res) => res.json({
+  ok: true,
+  sms: {
+    key: Boolean(process.env.TELNYX_API_KEY),
+    from: Boolean(process.env.TELNYX_FROM_NUMBER),
+    to: Boolean(process.env.ALERT_SMS_TO),
+  },
+}));
 
 // Public FAQ page — rendered from content/faqs.md (single source of truth,
 // shared with the chatbot's answer layer). Edit the markdown + redeploy.
@@ -211,8 +219,14 @@ app.use(
   })
 );
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(
     `Specialty Home Painting site on :${PORT} (extractor: ${EXTRACTOR_MODEL}, presenter: ${PRESENTER_MODEL})`
   );
+});
+
+// Graceful shutdown so Railway redeploys don't log a scary SIGTERM/npm error.
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received — shutting down cleanly.');
+  server.close(() => process.exit(0));
 });
