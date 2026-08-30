@@ -44,6 +44,8 @@
   .nav-links a { font-size: 13px; color: var(--mid); text-decoration: none; transition: color 0.2s; }
   .nav-links a:hover { color: var(--charcoal); }
   .nav-cta { background: var(--accent) !important; color: #fff !important; padding: 8px 20px; border-radius: 100px; font-size: 13px !important; font-weight: 500 !important; }
+  .nav-toggle { display: none; background: none; border: 0; cursor: pointer; padding: 6px; margin: -6px; color: var(--charcoal); }
+  .nav-toggle svg { width: 24px; height: 24px; display: block; }
   .hero { min-height: 88vh; display: grid; grid-template-columns: 1fr 1fr; align-items: center; max-width: 1100px; margin: 0 auto; padding: 5rem 2rem 4rem; gap: 4rem; }
   .hero-eyebrow { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); margin-bottom: 1.5rem; }
   .hero-eyebrow::before { content: ''; display: inline-block; width: 24px; height: 1px; background: var(--accent); }
@@ -207,7 +209,18 @@
     .pm-wrapper { grid-template-columns: 1fr; padding: 2.5rem 1.75rem; gap: 2.5rem; }
     .process-grid { grid-template-columns: 1fr 1fr; }
     .process-grid::before { display: none; }
-    .nav-links { display: none; }
+    .nav-toggle { display: block; }
+    .nav-links {
+      display: none; position: absolute; top: 60px; left: 0; right: 0;
+      flex-direction: column; align-items: stretch; gap: 0;
+      background: var(--warm-white); border-bottom: 1px solid var(--border);
+      padding: 6px 1.5rem 14px; box-shadow: 0 8px 20px rgba(0,0,0,0.06);
+    }
+    nav.nav-open .nav-links { display: flex; }
+    .nav-links li { width: 100%; }
+    .nav-links a { display: block; padding: 12px 2px; font-size: 15px; border-bottom: 1px solid var(--border); }
+    .nav-links li:last-child a { border-bottom: 0; }
+    .nav-cta { display: inline-block; margin-top: 10px; text-align: center; }
     .ba-grid { grid-template-columns: 1fr; }
     .about-grid { grid-template-columns: 1fr; }
     .photo-grid { grid-template-columns: repeat(2, 1fr); }
@@ -223,6 +236,9 @@
 
 <nav>
   <a href="#" class="nav-brand"><img src="/favicon.png" alt="Specialty Home Painting logo">Specialty Home Painting</a>
+  <button class="nav-toggle" aria-label="Menu" aria-expanded="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+  </button>
   <ul class="nav-links">
     <li><a href="#services">Services</a></li>
     <li><a href="pricing.html">Pricing</a></li>
@@ -700,6 +716,23 @@ async function submitContactForm() {
 </script>
 
 <script src="chat.js?v=12"></script>
+<script>
+(function () {
+  var nav = document.querySelector('nav');
+  if (!nav) return;
+  var t = nav.querySelector('.nav-toggle');
+  if (t) t.addEventListener('click', function () {
+    var open = nav.classList.toggle('nav-open');
+    t.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  nav.querySelectorAll('.nav-links a').forEach(function (a) {
+    a.addEventListener('click', function () {
+      nav.classList.remove('nav-open');
+      if (t) t.setAttribute('aria-expanded', 'false');
+    });
+  });
+})();
+</script>
 <!--
 <script src="https://api.foyer.ink/static/widget.js" data-agent-id="tl_a89381f3ff57" data-server="https://api.foyer.ink" async></script>
 -->
