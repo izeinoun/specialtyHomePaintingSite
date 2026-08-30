@@ -1,4 +1,109 @@
-<!DOCTYPE html>
+// ============================================================
+// Pricing page — rendered from the SAME rate data the chatbot and
+// PDFs use (server/pricing.js). Change a number in pricing.js and the
+// web page, chat estimates, and PDF/email quotes all update together.
+// ============================================================
+import {
+  MINIMUM,
+  ROOM_RATES,
+  CEILING_RATES,
+  TRIM_RATES,
+  CROWN_RATES,
+  INTERIOR_DOOR_RATES,
+  INTERIOR_FRENCH_DOOR_RATES,
+  EXTERIOR_DOOR_BASE,
+  EXTERIOR_FRENCH_DOOR,
+  WINDOW_RATES,
+  RAILING_RATES,
+} from './pricing.js';
+
+const fmt = (n) => '$' + Number(n).toLocaleString('en-US');
+const money = (low, high) => (low === high ? fmt(low) : fmt(low) + '–' + fmt(high));
+
+// Min low / max high across any nested structure of [low, high] pairs.
+function spanOf(x) {
+  if (Array.isArray(x)) return [x[0], x[1]];
+  let lo = Infinity, hi = -Infinity;
+  for (const k in x) {
+    const [l, h] = spanOf(x[k]);
+    if (l < lo) lo = l;
+    if (h > hi) hi = h;
+  }
+  return [lo, hi];
+}
+const span = (x) => money(...spanOf(x));
+
+export function renderPricingPage() {
+  const roomR = span(ROOM_RATES);
+  const idoorR = span(INTERIOR_DOOR_RATES);
+  const ifrenchR = span(INTERIOR_FRENCH_DOOR_RATES);
+  const edoorR = span(EXTERIOR_DOOR_BASE);
+  const efrenchR = money(...EXTERIOR_FRENCH_DOOR);
+  const minR = fmt(MINIMUM);
+
+  // Room matrix rows from ROOM_RATES
+  const matrixRows = ['small', 'medium', 'large']
+    .map((size) => {
+      const r = ROOM_RATES[size];
+      const name = size.charAt(0).toUpperCase() + size.slice(1);
+      return `<tr><td>${name}</td>` +
+        `<td class="money">${money(r.good[0], r.good[1])}</td>` +
+        `<td class="money">${money(r.fair[0], r.fair[1])}</td>` +
+        `<td class="money">${money(r.bad[0], r.bad[1])}</td></tr>`;
+    })
+    .join('\n          ');
+
+  // Summary "starting ranges" table rows
+  const summary = [
+    ['Interior room painting', roomR],
+    ['Ceiling add-on', span(CEILING_RATES)],
+    ['Trim &amp; baseboard add-on', span(TRIM_RATES)],
+    ['Crown molding add-on', span(CROWN_RATES)],
+    ['Window trim &amp; woodwork', span(WINDOW_RATES) + ' / window'],
+    ['Interior door restoration', idoorR + ' / door'],
+    ['Interior French door', ifrenchR + ' / door'],
+    ['Front / exterior door restoration', edoorR + ' / door'],
+    ['Front / exterior French door', efrenchR + ' / door'],
+    ['Banister / railing', span(RAILING_RATES)],
+    ['Larger drywall repairs', '$75–$400'],
+  ]
+    .map(([svc, range]) => `<tr><td class="svc">${svc}</td><td class="range">${range}</td></tr>`)
+    .join('\n          ');
+
+  const faq = [
+    {
+      q: 'How much does it cost to paint a bedroom in Orlando?',
+      a: `Most bedrooms are medium rooms, so they run ${money(ROOM_RATES.medium.good[0], ROOM_RATES.medium.good[1])} in good condition, ${money(ROOM_RATES.medium.fair[0], ROOM_RATES.medium.fair[1])} with some patching and prep, and ${money(ROOM_RATES.medium.bad[0], ROOM_RATES.medium.bad[1])} when significant repair is needed. Ceiling, trim, and crown molding are priced on top. For an exact number, tell our chat estimator the room size and condition.`,
+    },
+    {
+      q: 'How much does it cost to paint a front door in Orlando?',
+      a: `Front door refinishing runs ${edoorR} per door (French/glass-panel front doors ${efrenchR}). That covers full restoration — surface repair, peeling-paint prep, priming, and two coats of durable alkyd enamel — across two visits so the enamel can cure overnight between coats. Oversized doors and doors with a sidelight sit toward the top of the range.`,
+    },
+    {
+      q: 'How much does it cost to restore an interior door?',
+      a: `Interior door restoration is ${idoorR} per door, depending on condition. Light scuffs are toward the lower end; scratches and chips that need filling and priming fall in the middle; peeling or gouged doors that need real repair land at the upper end. Interior French doors run ${ifrenchR}.`,
+    },
+    {
+      q: 'What is the minimum project charge?',
+      a: `Every job carries a ${minR} minimum, whatever the line items add up to. It keeps small, detail-heavy jobs — a single door, a quick trim touch-up — worth doing right.`,
+    },
+  ];
+
+  const faqHtml = faq
+    .map((f) => `<h3>${f.q}</h3>\n    <p>${f.a}</p>`)
+    .join('\n\n    ');
+
+  const jsonLd = JSON.stringify({
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: faq.map((f) => ({
+      '@type': 'Question',
+      name: f.q.replace(/&amp;/g, '&'),
+      acceptedAnswer: { '@type': 'Answer', text: f.a.replace(/&amp;/g, '&').replace(/–/g, '-') },
+    })),
+  });
+
+  return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -13,30 +118,21 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="icon" type="image/png" href="/favicon.png">
 <title>Painting &amp; Door Restoration Pricing in Orlando — Specialty Home Painting</title>
-<meta name="description" content="Interior painting pricing, door restoration cost, and front door refinishing cost in Orlando, FL. Priced by size, condition, and preparation. Interior doors $120–$280, front/exterior doors $500–$800, minimum project $350.">
-<link rel="canonical" href="https://specialtyhomepainting.com/pricing.html">
+<meta name="description" content="Interior painting pricing by room size and condition, door restoration cost, and front door refinishing cost in Orlando, FL. Bedrooms from ${money(ROOM_RATES.medium.good[0], ROOM_RATES.medium.good[1])}, interior doors ${idoorR}, front/exterior doors ${edoorR}, minimum project ${minR}.">
+<link rel="canonical" href="https://specialtyhomepainting.com/pricing">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root {
-    --cream: #F7F4EF;
-    --warm-white: #FDFCFA;
-    --charcoal: #1C1C1A;
-    --mid: #6B6860;
-    --light: #B8B4AC;
-    --accent: #2A5C3F;
-    --accent-light: #EAF2ED;
-    --border: rgba(28,28,26,0.10);
-    --serif: 'DM Serif Display', Georgia, serif;
-    --sans: 'DM Sans', sans-serif;
+    --cream: #F7F4EF; --warm-white: #FDFCFA; --charcoal: #1C1C1A; --mid: #6B6860;
+    --light: #B8B4AC; --accent: #2A5C3F; --accent-light: #EAF2ED;
+    --border: rgba(28,28,26,0.10); --serif: 'DM Serif Display', Georgia, serif; --sans: 'DM Sans', sans-serif;
   }
   html { scroll-behavior: smooth; }
   body { font-family: var(--sans); background: var(--warm-white); color: var(--charcoal); font-size: 16px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
   a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
-
-  /* NAV — matches index.html */
   nav { position: sticky; top: 0; z-index: 100; background: rgba(253,252,250,0.92); backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); padding: 0 2rem; display: flex; align-items: center; justify-content: space-between; height: 60px; }
   .nav-brand { display: flex; align-items: center; gap: 10px; font-family: var(--serif); font-size: 18px; color: var(--charcoal); text-decoration: none; }
   .nav-brand img { height: 34px; width: 34px; display: block; }
@@ -49,16 +145,12 @@
   .nav-cta { background: var(--accent) !important; color: #fff !important; padding: 8px 20px; border-radius: 100px; font-size: 13px !important; font-weight: 500 !important; }
   .nav-toggle { display: none; background: none; border: 0; cursor: pointer; padding: 6px; margin: -6px; color: var(--charcoal); }
   .nav-toggle svg { width: 24px; height: 24px; display: block; }
-
-  /* PAGE HEADER */
   .page-head { max-width: 820px; margin: 0 auto; padding: 5rem 2rem 2.5rem; }
   .page-eyebrow { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); margin-bottom: 1.25rem; }
   .page-eyebrow::before { content: ''; display: inline-block; width: 24px; height: 1px; background: var(--accent); }
   .page-head h1 { font-family: var(--serif); font-size: clamp(32px, 5vw, 50px); line-height: 1.1; letter-spacing: -0.02em; margin-bottom: 1.25rem; }
   .page-head .lead { font-size: 17px; color: var(--charcoal); font-weight: 300; line-height: 1.75; max-width: 640px; }
-
   .divider { border: none; border-top: 1px solid var(--border); margin: 0 2rem; }
-
   main { max-width: 820px; margin: 0 auto; padding: 0 2rem 4rem; }
   section { padding: 3rem 0; border-bottom: 1px solid var(--border); }
   section:last-of-type { border-bottom: none; }
@@ -68,43 +160,39 @@
   main p { font-size: 16px; color: var(--mid); line-height: 1.8; font-weight: 300; margin-bottom: 1.1rem; }
   main p:last-child { margin-bottom: 0; }
   main strong { font-weight: 500; color: var(--charcoal); }
-
-  /* RANGES TABLE */
   .price-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 14px; }
-  table.prices { width: 100%; border-collapse: collapse; min-width: 420px; }
-  table.prices th, table.prices td { text-align: left; padding: 14px 20px; border-bottom: 1px solid var(--border); font-size: 15px; }
-  table.prices thead th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--mid); font-weight: 500; background: var(--cream); }
-  table.prices tbody tr:last-child td { border-bottom: none; }
+  table.prices, table.matrix { width: 100%; border-collapse: collapse; min-width: 460px; }
+  table.prices th, table.prices td, table.matrix th, table.matrix td { text-align: left; padding: 14px 20px; border-bottom: 1px solid var(--border); font-size: 15px; }
+  table.prices thead th, table.matrix thead th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--mid); font-weight: 500; background: var(--cream); }
+  table.prices tbody tr:last-child td, table.matrix tbody tr:last-child td { border-bottom: none; }
   table.prices td.svc { color: var(--charcoal); font-weight: 400; }
   table.prices td.range { text-align: right; white-space: nowrap; font-weight: 500; color: var(--accent); }
-  table.prices tr.min td { background: var(--accent-light); }
+  table.matrix th, table.matrix td { text-align: right; white-space: nowrap; }
+  table.matrix th:first-child, table.matrix td:first-child { text-align: left; color: var(--charcoal); }
+  table.matrix td.money { color: var(--accent); font-weight: 500; }
   .table-note { font-size: 13px; color: var(--light); font-weight: 300; margin-top: 0.9rem; }
-
-  /* HIGHLIGHT CARD — front door */
+  .bridge { margin-top: 1.25rem; font-size: 15px; }
+  .bridge a { color: var(--accent); font-weight: 500; text-decoration: none; }
+  .bridge a:hover { text-decoration: underline; }
+  .callout { border: 1px solid var(--border); border-left: 3px solid var(--accent); background: var(--accent-light); border-radius: 0 16px 16px 0; padding: 1.6rem 1.75rem; }
+  .callout .big { font-family: var(--serif); font-size: 24px; color: var(--accent); margin-bottom: 0.5rem; }
+  .callout p { color: var(--charcoal); margin: 0; }
   .highlight { border: 1px solid var(--border); border-left: 3px solid var(--accent); background: var(--accent-light); border-radius: 0 16px 16px 0; padding: 2rem 2rem 1.75rem; }
   .highlight .price-line { font-family: var(--serif); font-size: 26px; color: var(--accent); margin-bottom: 1rem; }
   .highlight p { color: var(--charcoal); }
   .highlight .visit-note { font-size: 15px; color: var(--mid); border-top: 1px solid var(--border); padding-top: 1.1rem; margin-top: 1.1rem; margin-bottom: 0; }
-
-  /* CONDITION TIERS */
   .tiers { list-style: none; margin: 1.25rem 0 0; padding: 0; display: grid; gap: 0.75rem; }
   .tiers li { display: flex; gap: 12px; align-items: baseline; font-size: 15px; color: var(--mid); font-weight: 300; }
   .tiers .lvl { flex: 0 0 auto; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 500; color: var(--accent); min-width: 92px; }
-
-  /* FAQ */
   .faq h3 { margin-top: 2rem; }
   .faq h3:first-of-type { margin-top: 0; }
-
-  /* CTA */
   .cta { background: var(--cream); border-top: 1px solid var(--border); padding: 4rem 2rem; text-align: center; }
   .cta h2 { font-family: var(--serif); font-size: clamp(26px, 3.5vw, 36px); letter-spacing: -0.02em; margin-bottom: 0.75rem; }
   .cta p { font-size: 15px; color: var(--mid); font-weight: 300; margin-bottom: 2rem; }
   .btn-primary { background: var(--charcoal); color: #fff; padding: 14px 28px; border-radius: 100px; font-size: 14px; font-weight: 500; text-decoration: none; transition: background 0.2s; display: inline-block; }
   .btn-primary:hover { background: var(--accent); }
-
   footer { padding: 1.5rem 2rem; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; max-width: 1100px; margin: 0 auto; }
   footer p { font-size: 12px; color: var(--light); }
-
   @media (max-width: 768px) {
     .nav-toggle { display: block; }
     .nav-links {
@@ -123,68 +211,82 @@
     .cta { padding: 3rem 1.5rem; }
     .tiers li { flex-direction: column; gap: 2px; }
   }
-  @media (prefers-reduced-motion: reduce) {
-    html { scroll-behavior: auto; }
-    * { transition: none !important; animation: none !important; }
-  }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { transition: none !important; animation: none !important; } }
 </style>
 </head>
 <body>
 
 <nav>
-  <a href="index.html" class="nav-brand"><img src="/favicon.png" alt="Specialty Home Painting logo">Specialty Home Painting</a>
+  <a href="/index.html" class="nav-brand"><img src="/favicon.png" alt="Specialty Home Painting logo">Specialty Home Painting</a>
   <button class="nav-toggle" aria-label="Menu" aria-expanded="false">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
   </button>
   <ul class="nav-links">
-    <li><a href="index.html#services">Services</a></li>
-    <li><a href="pricing.html" class="current">Pricing</a></li>
+    <li><a href="/index.html#services">Services</a></li>
+    <li><a href="/pricing" class="current">Pricing</a></li>
     <li><a href="/faqs">FAQ</a></li>
-    <li><a href="index.html#gallery">Gallery</a></li>
-    <li><a href="lessons.html">Lessons</a></li>
-    <li><a href="index.html#process">Process</a></li>
-    <li><a href="index.html#property-managers">Property Managers</a></li>
-    <li><a href="index.html#contact" class="nav-cta">Get a free estimate</a></li>
+    <li><a href="/index.html#gallery">Gallery</a></li>
+    <li><a href="/lessons.html">Lessons</a></li>
+    <li><a href="/index.html#process">Process</a></li>
+    <li><a href="/index.html#property-managers">Property Managers</a></li>
+    <li><a href="/index.html#contact" class="nav-cta">Get a free estimate</a></li>
   </ul>
 </nav>
 
 <header class="page-head">
   <div class="page-eyebrow">Pricing</div>
   <h1>Painting &amp; Door Restoration Pricing in Orlando</h1>
-  <p class="lead">Most projects are priced according to <strong>size, condition, and the amount of preparation required</strong>. Because I specialize in repair and detailed finish work, two rooms or doors that look similar can need very different amounts of prep — so these are honest starting ranges, not flat rates.</p>
+  <p class="lead">Most projects are priced by <strong>size, condition, and the amount of preparation required</strong>. Because I specialize in repair and detailed finish work, two rooms or doors that look similar can need very different amounts of prep — so these are honest ranges, not flat rates.</p>
 </header>
 
 <hr class="divider">
 
 <main>
 
+  <!-- ROOM MATRIX -->
+  <section>
+    <div class="sec-label">Interior painting</div>
+    <h2>Interior room painting — by size &amp; condition</h2>
+    <p>Per room, before any add-ons. &ldquo;Significant prep&rdquo; means real repair — filling, sanding, and feathering damaged areas into the wall before priming.</p>
+    <div class="price-table-wrap">
+      <table class="matrix">
+        <thead>
+          <tr><th>Room</th><th>Good condition</th><th>Fair condition</th><th>Significant prep</th></tr>
+        </thead>
+        <tbody>
+          ${matrixRows}
+        </tbody>
+      </table>
+    </div>
+    <p class="table-note">Bedrooms are typically treated as medium rooms unless measurements indicate otherwise. Ceiling, trim, and crown molding are priced on top.</p>
+    <p class="bridge">Want a number for your exact room? <a href="/index.html#contact">Tell our chat estimator the size and condition &rarr;</a></p>
+  </section>
+
   <!-- STARTING RANGES -->
   <section>
     <div class="sec-label">Starting ranges</div>
-    <h2>What to expect</h2>
-    <p>These ranges cover most jobs in the greater Orlando area. Where your project lands depends on the surface, the condition, and how much repair and preparation it needs before any paint goes on.</p>
+    <h2>Everything, at a glance</h2>
+    <p>Where your project lands depends on the surface, the condition, and how much repair and preparation it needs before any paint goes on.</p>
     <div class="price-table-wrap">
       <table class="prices">
         <thead>
           <tr><th>Service</th><th style="text-align:right;">Typical range</th></tr>
         </thead>
         <tbody>
-          <tr><td class="svc">Interior room painting</td><td class="range">$150–$780</td></tr>
-          <tr><td class="svc">Ceiling add-on</td><td class="range">$75–$180</td></tr>
-          <tr><td class="svc">Trim &amp; baseboard add-on</td><td class="range">$50–$120</td></tr>
-          <tr><td class="svc">Crown molding add-on</td><td class="range">$70–$220</td></tr>
-          <tr><td class="svc">Window trim &amp; woodwork</td><td class="range">$60–$220 / window</td></tr>
-          <tr><td class="svc">Interior door restoration</td><td class="range">$120–$280 / door</td></tr>
-          <tr><td class="svc">Interior French door</td><td class="range">$250–$580 / door</td></tr>
-          <tr><td class="svc">Front / exterior door restoration</td><td class="range">$500–$800 / door</td></tr>
-          <tr><td class="svc">Front / exterior French door</td><td class="range">$900–$1,300 / door</td></tr>
-          <tr><td class="svc">Banister / railing</td><td class="range">$150–$575</td></tr>
-          <tr><td class="svc">Larger drywall repairs</td><td class="range">$75–$400</td></tr>
-          <tr class="min"><td class="svc"><strong>Minimum project</strong></td><td class="range">$350</td></tr>
+          ${summary}
         </tbody>
       </table>
     </div>
-    <p class="table-note">Minor drywall patches are included in the room price. Damage larger than about an inch is quoted separately after a quick photo review. Every project carries a $350 minimum.</p>
+    <p class="table-note">Minor drywall patches are included in the room price. Damage larger than about an inch is quoted separately after a quick photo review.</p>
+  </section>
+
+  <!-- MINIMUM CALLOUT -->
+  <section>
+    <div class="sec-label">Good to know</div>
+    <div class="callout">
+      <div class="big">${minR} minimum project charge</div>
+      <p>Every project carries a ${minR} minimum, no matter how the individual line items add up. It keeps small, detail-heavy jobs worth doing right — and means there are no surprises when a single small item is priced.</p>
+    </div>
   </section>
 
   <!-- FRONT DOOR EMPHASIS -->
@@ -192,8 +294,8 @@
     <div class="sec-label">Signature service</div>
     <h2>Front &amp; exterior door restoration</h2>
     <div class="highlight">
-      <div class="price-line">$500–$800 per door</div>
-      <p>This is a restoration and refinishing service — not simply a repaint. Pricing includes preparation, repair of minor surface damage, peeling-paint prep, priming, and two coats of alkyd enamel. Particularly large doors, or doors with a sidelight, are generally toward the upper end of the range.</p>
+      <div class="price-line">${edoorR} per door</div>
+      <p>A restoration and refinishing service — not simply a repaint. Pricing includes preparation, repair of minor surface damage, peeling-paint prep, priming, and two coats of alkyd enamel. Oversized doors, or doors with a sidelight, are generally toward the upper end. French / glass-panel front doors run ${efrenchR} for the detailed pane-by-pane work.</p>
       <p class="visit-note"><strong>Two visits are required</strong> because the enamel needs an overnight cure between coats. The return visit to rehang the door and reinstall the hardware is included in the price.</p>
     </div>
   </section>
@@ -201,8 +303,8 @@
   <!-- INTERIOR DOORS -->
   <section>
     <div class="sec-label">Interior doors</div>
-    <h2>Interior door restoration — $120–$280 per door</h2>
-    <p>Interior door pricing depends on condition. The more repair and preparation a door needs before refinishing, the higher it lands in the range:</p>
+    <h2>Interior door restoration — ${idoorR} per door</h2>
+    <p>Interior door pricing depends on condition. The more repair and preparation a door needs before refinishing, the higher it lands in the range (French doors run ${ifrenchR}):</p>
     <ul class="tiers">
       <li><span class="lvl">Lower end</span><span>Light scuffs — scuff-sand and two fresh coats.</span></li>
       <li><span class="lvl">Middle</span><span>Scratches and chips that need filling, sanding, and priming first.</span></li>
@@ -227,17 +329,7 @@
     <div class="sec-label">Common questions</div>
     <h2>Pricing questions, answered</h2>
 
-    <h3>How much does it cost to paint a front door in Orlando?</h3>
-    <p>Front door refinishing runs <strong>$500–$800 per door</strong>. That covers full front door restoration — surface repair, peeling-paint prep, priming, and two coats of durable alkyd enamel — across two visits so the enamel can cure overnight between coats. Oversized doors and doors with a sidelight sit toward the top of the range.</p>
-
-    <h3>How much does it cost to restore an interior door?</h3>
-    <p>Interior door restoration is <strong>$120–$280 per door</strong>, depending on condition. Light scuffs are toward the lower end; scratches and chips that need filling and priming fall in the middle; peeling or gouged doors that need real repair land at the upper end.</p>
-
-    <h3>Why does door restoration cost more than ordinary painting?</h3>
-    <p>Because most of the work happens before the finish coat. A generic painter rolls paint over what's there; door restoration means repairing damage, prepping failing paint, priming, and applying an enamel that holds up to daily use and weather. On exterior doors that also means two visits and an overnight cure. You're paying for preparation and a finish that lasts — not just a fresh coat over an old problem.</p>
-
-    <h3>What is the minimum project charge?</h3>
-    <p>Every job carries a <strong>$350 minimum</strong>, whatever the line items add up to. It keeps small, detail-heavy jobs — a single door, a quick trim touch-up — worth doing right.</p>
+    ${faqHtml}
   </section>
 
 </main>
@@ -245,7 +337,7 @@
 <div class="cta">
   <h2>Want a number for your specific project?</h2>
   <p>Free estimate, no obligation. Serving Orlando and surrounding areas.</p>
-  <a href="index.html#contact" class="btn-primary">Get a free estimate</a>
+  <a href="/index.html#contact" class="btn-primary">Get a free estimate</a>
 </div>
 
 <footer>
@@ -257,44 +349,7 @@
 </footer>
 
 <script type="application/ld+json">
-{
-  "@context": "https://schema.org",
-  "@type": "FAQPage",
-  "mainEntity": [
-    {
-      "@type": "Question",
-      "name": "How much does it cost to paint a front door in Orlando?",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "Front door refinishing in Orlando runs $500–$800 per door. That covers full front door restoration — surface repair, peeling-paint preparation, priming, and two coats of durable alkyd enamel — across two visits so the enamel can cure overnight between coats. Oversized doors and doors with a sidelight sit toward the top of the range."
-      }
-    },
-    {
-      "@type": "Question",
-      "name": "How much does it cost to restore an interior door?",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "Interior door restoration is $120–$280 per door, depending on condition. Light scuffs are toward the lower end; scratches and chips that need filling and priming fall in the middle; peeling or gouged doors that need real repair land at the upper end."
-      }
-    },
-    {
-      "@type": "Question",
-      "name": "Why does door restoration cost more than ordinary painting?",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "Because most of the work happens before the finish coat. A generic painter rolls paint over what's there; door restoration means repairing damage, prepping failing paint, priming, and applying an enamel that holds up to daily use and weather. On exterior doors that also means two visits and an overnight cure. You're paying for preparation and a finish that lasts."
-      }
-    },
-    {
-      "@type": "Question",
-      "name": "What is the minimum project charge?",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "Every job carries a $350 minimum, whatever the line items add up to. It keeps small, detail-heavy jobs — a single door, a quick trim touch-up — worth doing right."
-      }
-    }
-  ]
-}
+${jsonLd}
 </script>
 
 <script>
@@ -315,4 +370,5 @@
 })();
 </script>
 </body>
-</html>
+</html>`;
+}

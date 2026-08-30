@@ -12,6 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Anthropic from '@anthropic-ai/sdk';
 import { renderFaqPage } from './knowledge.js';
+import { renderPricingPage } from './pricing-page.js';
 import {
   runExtractor,
   planReply,
@@ -102,6 +103,17 @@ app.get('/faqs', (_req, res) => {
   } catch (err) {
     console.error('FAQ render error:', err);
     res.status(500).type('text').send('FAQ page unavailable.');
+  }
+});
+
+// Pricing page — rendered from server/pricing.js (single source of pricing
+// data shared with the chatbot and PDFs). /pricing.html kept for old links.
+app.get(['/pricing', '/pricing.html'], (_req, res) => {
+  try {
+    res.set('Cache-Control', 'no-cache').type('html').send(renderPricingPage());
+  } catch (err) {
+    console.error('Pricing render error:', err);
+    res.status(500).type('text').send('Pricing page unavailable.');
   }
 });
 
