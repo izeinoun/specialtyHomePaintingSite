@@ -128,6 +128,9 @@ export async function runExtractor(client, { history, message }) {
   const res = await client.messages.create({
     model: EXTRACTOR_MODEL,
     max_tokens: 1024,
+    // Structured extraction is a mapping task, not a reasoning one — turn off
+    // adaptive thinking (on by default for Sonnet) to cut the pre-stream wait.
+    thinking: { type: 'disabled' },
     system: sys(EXTRACTOR_SYSTEM),
     messages,
     output_config: { format: { type: 'json_schema', schema: EXTRACTOR_SCHEMA } },
