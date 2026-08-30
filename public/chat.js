@@ -472,6 +472,7 @@
       quoteLinesText(q) + '\n\n' +
       'TOTAL: ' + total + '\n\n' +
       extras +
+      'Payment: 30% deposit to schedule your job; the remaining 70% is due on completion.\n\n' +
       'This is a preliminary range. The final price is confirmed after Issam sees the work in person, and it does not change once agreed.\n\n' +
       BUSINESS.name + ' | ' + BUSINESS.phone + ' | ' + BUSINESS.site;
 
@@ -583,6 +584,14 @@
     doc.setFont('helvetica', 'bold').setFontSize(11).setTextColor(255, 255, 255).text('TOTAL', M + 12, y + 20);
     doc.setFontSize(13).text(money(q.total_low, q.total_high), W - M - 12, y + 20, { align: 'right' });
     y += 46;
+
+    // Payment terms
+    ensureSpace(24);
+    doc.setFont('helvetica', 'bold').setFontSize(9).setTextColor(31, 59, 87).text('PAYMENT', M, y);
+    doc.setFont('helvetica', 'normal').setFontSize(9).setTextColor(60, 60, 60);
+    var payLines = doc.splitTextToSize('30% deposit to schedule your job; the remaining 70% is due on completion.', CW - 66);
+    doc.text(payLines, M + 62, y);
+    y += Math.max(payLines.length * 12, 12) + 12;
 
     // Notes
     var notes = [];

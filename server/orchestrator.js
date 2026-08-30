@@ -40,7 +40,7 @@ Rules:
   - "restart" — they want to start over / a new quote.
   - "talk_to_human" — ONLY when they explicitly ask to speak with, call, or be contacted by Issam / a person.
 - suggested_replies: when intent is "gather" and the next step is a choice among a few options, give 2–4 short tappable options for the customer (e.g. ["Interior door","Front/exterior door"], ["Small","Medium","Large"], ["Good","Fair","Bad"]). Otherwise [].
-- If the customer asked a question, set user_question to their question and answer_topics to 1–3 lowercase keywords (e.g. "paint","enamel","warranty","timeline","drywall","doors","trim","prep","process","minimum"). Otherwise user_question = "" and answer_topics = [].`;
+- If the customer asked a question, set user_question to their question and answer_topics to 1–3 lowercase keywords (e.g. "paint","enamel","warranty","timeline","drywall","doors","trim","prep","process","minimum","payment","deposit"). Otherwise user_question = "" and answer_topics = [].`;
 
 const ENUM_SIZE = ['small', 'medium', 'large', 'unknown'];
 const ENUM_COND = ['good', 'fair', 'bad', 'unknown'];

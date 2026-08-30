@@ -120,3 +120,11 @@ The focus is on **specialty repairs, detailed preparation, doors, windows, trim,
 Rather than treating every project as a standard painting job, we look at the condition of the surface and determine what needs to be repaired and prepared before applying the finish.
 
 That makes the business particularly suited to homeowners who have **something that needs to be done carefully rather than simply painted quickly.**
+
+---
+
+### 11\. Do you require a deposit? How does payment work?
+
+**Yes — a deposit reserves your spot on the calendar.** For most jobs it's **30% to schedule the work, with the remaining 70% due once the job is complete and you're satisfied.**
+
+The deposit covers materials and secures your date; the balance is only due after the work is finished. Exact terms are confirmed with your written estimate.
