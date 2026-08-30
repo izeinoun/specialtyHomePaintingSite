@@ -1,32 +1,31 @@
 // ============================================================
 // SPECIALTY HOME PAINTING — CHAT WIDGET
-// Drop-in replacement for chat.js
-// Rev. August 2026
 //
-// Fixes:
-//   - Markdown tables now render (was stripping | and --- into %%%%%)
-//   - store_quote payload parsed for real line items and totals
-//   - Estimate disclaimer + closing line no longer stripped
-//   - XSS-safe: all model output is escaped before formatting
+// Talks to POST /chat (NDJSON stream). Each turn the server returns:
+//   {type:"delta", text}                 streamed reply text (live preview)
+//   {type:"done", reply, quote, buttons} final reply + structured quote
+//                                         (or null) + soft action buttons
+//   {type:"error", error}                failure
 //
-// Requires (already in index.html):
-//   - jsPDF  ................ window.jspdf
-//   - EmailJS ............... window.emailjs, already init()'d
-//   - #chatFab #chatOverlay #chatPopup #chatMessages #chatInputArea
+// Money and buttons come from the server (deterministic pricer +
+// orchestrator). The widget renders the reply, stores the structured
+// quote for the PDF/email, and dispatches buttons by their `action`.
+//
+// Requires (already in index.html): jsPDF (window.jspdf), EmailJS
+// (window.emailjs, init()'d), and the #chat* DOM nodes.
 // ============================================================
 
 (function () {
   'use strict';
 
   // ----------------------------------------------------------
-  // CONFIG — chat now runs on our own Railway server (same origin).
+  // CONFIG
   // ----------------------------------------------------------
-  var CHAT_PROXY_URL = '/chat';
-  var QUOTE_SHEETS_URL = 'https://script.google.com/macros/s/AKfycbwW4JaSlvo28cA2AjVDvCgUZX5aFUxoW6DSX0qndfN_Jm2VmSEcqWzbM_KPzadVw6G2/exec';
+  var CHAT_URL = '/chat';
 
-  var EMAILJS_SERVICE  = 'service_s9zggu9';
-  var EMAILJS_TEMPLATE = 'template_yrs9zfk';       // contact-form template (to business)
-  var EMAILJS_QUOTE_TEMPLATE = 'template_66n8bpb'; // quote template: To={{email}} (customer), Bcc business
+  var EMAILJS_SERVICE = 'service_s9zggu9';
+  var EMAILJS_QUOTE_TEMPLATE = 'template_66n8bpb'; // quote -> customer (To={{email}}), Bcc business
+  var EMAILJS_LEAD_TEMPLATE  = 'template_yrs9zfk';  // lead  -> business (contact template)
 
   var BUSINESS = {
     name:  'Specialty Home Painting',
@@ -37,14 +36,18 @@
     addr:  '14370 Sapelo Beach Dr., Orlando, FL 32827'
   };
 
-  var GREETING = "Hi! I can put together a rough estimate for you right here. What are you looking to have done?";
-  var STARTERS = ['Door restoration', 'Interior painting', 'Drywall repair', 'Something else'];
+  var GREETING = "Hi! I can put together a quick estimate right here, or answer questions about the work. What are you looking to have done?";
+  var STARTER_BUTTONS = [
+    { label: 'Interior painting', action: 'reply' },
+    { label: 'Door restoration', action: 'reply' },
+    { label: 'Ask a question', action: 'reply' }
+  ];
 
   // ----------------------------------------------------------
   // STATE
   // ----------------------------------------------------------
-  var history = [];        // [{role, content}] sent to the API
-  var lastQuote = null;    // most recent store_quote data object
+  var history = [];     // [{role, content}] — conversation so far
+  var lastQuote = null; // most recent structured quote from the server, or null
   var busy = false;
   var started = false;
 
@@ -60,7 +63,6 @@
     '.msg-bubble li { margin-bottom: 3px; font-size: 13.5px; }',
     '.msg-bubble hr { border: none; border-top: 1px solid var(--border); margin: 10px 0; }',
     '.msg-bubble h4 { font-size: 14px; font-weight: 500; margin: 4px 0 6px; }',
-    // Estimate table — rendered as a compact definition list, not a real table.
     '.q-table { width: 100%; margin: 8px 0 10px; border-collapse: collapse; }',
     '.q-table td { padding: 5px 0; font-size: 13px; vertical-align: top;',
     '  border-bottom: 1px solid var(--border); }',
@@ -101,9 +103,7 @@
   }
 
   // ----------------------------------------------------------
-  // MARKDOWN -> HTML
-  // Handles: tables, bold, italic, bullets, hr, headings, links.
-  // Everything is escaped first, so model output can never inject HTML.
+  // MARKDOWN -> HTML (escaped first, so model output can't inject HTML)
   // ----------------------------------------------------------
   function inlineMd(text) {
     return escapeHtml(text)
@@ -112,14 +112,8 @@
       .replace(/`([^`]+)`/g, '<code>$1</code>');
   }
 
-  function isTableRow(line) {
-    return line.trim().charAt(0) === '|';
-  }
-
-  function isTableSeparator(line) {
-    return /^\|[\s\-:|]+\|?\s*$/.test(line.trim());
-  }
-
+  function isTableRow(line) { return line.trim().charAt(0) === '|'; }
+  function isTableSeparator(line) { return /^\|[\s\-:|]+\|?\s*$/.test(line.trim()); }
   function splitRow(line) {
     var cells = line.trim().split('|');
     if (cells.length && cells[0].trim() === '') cells.shift();
@@ -136,17 +130,12 @@
       var line = lines[i];
       var t = line.trim();
 
-      // --- blank
       if (t === '') { i++; continue; }
 
-      // --- horizontal rule
       if (/^-{3,}$/.test(t) || /^_{3,}$/.test(t) || /^\*{3,}$/.test(t)) {
-        out.push('<hr>');
-        i++;
-        continue;
+        out.push('<hr>'); i++; continue;
       }
 
-      // --- table block
       if (isTableRow(t)) {
         var rows = [];
         while (i < lines.length && isTableRow(lines[i].trim())) {
@@ -154,10 +143,7 @@
           i++;
         }
         if (rows.length) {
-          // Drop a header row that is literally Item / Cost
-          if (rows.length > 1 &&
-              /^item$/i.test(rows[0][0] || '') &&
-              /^cost$/i.test(rows[0][1] || '')) {
+          if (rows.length > 1 && /^item$/i.test(rows[0][0] || '') && /^cost$/i.test(rows[0][1] || '')) {
             rows.shift();
           }
           var html = '<table class="q-table">';
@@ -175,17 +161,13 @@
         continue;
       }
 
-      // --- Total line: **Total: $X – $Y**
       var totalMatch = t.match(/^\*\*\s*Total:?\s*(.+?)\s*\*\*$/i);
       if (totalMatch) {
-        out.push('<div class="q-total">' +
-                 '<span class="q-total-label">Total</span>' +
+        out.push('<div class="q-total"><span class="q-total-label">Total</span>' +
                  '<span class="q-total-value">' + escapeHtml(totalMatch[1]) + '</span></div>');
-        i++;
-        continue;
+        i++; continue;
       }
 
-      // --- bullet list
       if (/^[-*•]\s+/.test(t)) {
         var items = [];
         while (i < lines.length && /^[-*•]\s+/.test(lines[i].trim())) {
@@ -196,36 +178,23 @@
         continue;
       }
 
-      // --- heading
       if (/^#{1,6}\s+/.test(t)) {
         out.push('<h4>' + inlineMd(t.replace(/^#{1,6}\s+/, '')) + '</h4>');
-        i++;
-        continue;
+        i++; continue;
       }
 
-      // --- standalone bold line acts as a small heading
       if (/^\*\*[^*]+\*\*$/.test(t)) {
         out.push('<h4>' + inlineMd(t.replace(/\*\*/g, '')) + '</h4>');
-        i++;
-        continue;
+        i++; continue;
       }
 
-      // --- italic-only line = the disclaimer
-      if (/^\*[^*].*\*$/.test(t)) {
-        out.push('<p class="q-note">' + inlineMd(t.replace(/^\*|\*$/g, '')) + '</p>');
-        i++;
-        continue;
-      }
-
-      // --- paragraph (collect until blank or structural line)
       var para = [];
       while (i < lines.length) {
         var pl = lines[i].trim();
         if (pl === '' || isTableRow(pl) || /^[-*•]\s+/.test(pl) ||
             /^-{3,}$/.test(pl) || /^#{1,6}\s+/.test(pl) ||
             /^\*\*\s*Total:?/i.test(pl)) break;
-        para.push(pl);
-        i++;
+        para.push(pl); i++;
       }
       if (para.length) out.push('<p>' + inlineMd(para.join(' ')) + '</p>');
     }
@@ -234,7 +203,7 @@
   }
 
   // ----------------------------------------------------------
-  // MESSAGE RENDERING
+  // MESSAGE + BUTTON RENDERING
   // ----------------------------------------------------------
   function addMessage(who, html, opts) {
     opts = opts || {};
@@ -258,22 +227,46 @@
     return wrap;
   }
 
-  function addButtons(labels, handler, extraClass) {
+  // Render soft buttons from the server. `reply` chips send their label as a
+  // message (and clear the row on tap); action buttons dispatch and persist so
+  // the customer can, e.g., both email and download a quote.
+  function renderButtons(buttons) {
+    if (!buttons || !buttons.length) return null;
     var row = document.createElement('div');
     row.className = 'chat-options';
-    labels.forEach(function (label) {
+    buttons.forEach(function (btn) {
+      var isAction = btn.action && btn.action !== 'reply';
       var b = document.createElement('button');
-      b.className = 'chat-option' + (extraClass ? ' ' + extraClass : '');
-      b.textContent = label;
+      b.className = 'chat-option' + (isAction ? ' chat-option-quote' : '');
+      b.textContent = btn.label;
       b.onclick = function () {
-        row.remove();
-        handler(label);
+        if (btn.action === 'reply') { row.remove(); send(btn.label); }
+        else dispatchAction(btn.action);
       };
       row.appendChild(b);
     });
     $('chatMessages').appendChild(row);
     scrollDown();
     return row;
+  }
+
+  function dispatchAction(action) {
+    if (action === 'call_issam') { window.location.href = 'tel:' + BUSINESS.tel; return; }
+    if (action === 'new_quote') { startNewQuote(); return; }
+    if (action === 'view_pdf') {
+      if (lastQuote) downloadQuotePdf(lastQuote);
+      else addMessage('bot', '<p>Let’s finish your estimate first, then I can make the PDF.</p>');
+      return;
+    }
+    if (action === 'email_quote') {
+      if (lastQuote) askForEmail('What email should I send the quote to?', emailQuote);
+      else addMessage('bot', '<p>Once we’ve got your estimate, I can email it to you.</p>');
+      return;
+    }
+    if (action === 'email_issam') {
+      askForEmail('What’s the best email for Issam to reach you? I’ll pass along your details.', sendLead);
+      return;
+    }
   }
 
   function showTyping() {
@@ -284,14 +277,18 @@
     $('chatMessages').appendChild(w);
     scrollDown();
   }
-
   function hideTyping() {
     var t = $('typingIndicator');
     if (t) t.remove();
   }
 
+  function botError(msg) {
+    addMessage('bot', '<p>' + msg + ' Call or text Issam at <a href="tel:' +
+      BUSINESS.tel + '">' + BUSINESS.phone + '</a>.</p>');
+  }
+
   // ----------------------------------------------------------
-  // SEND
+  // SEND + STREAM
   // ----------------------------------------------------------
   function send(text) {
     if (busy || !text || !text.trim()) return;
@@ -300,39 +297,19 @@
 
     addMessage('user', escapeHtml(text));
     history.push({ role: 'user', content: text });
-    if (history.length > 10) history = history.slice(-10);
+    if (history.length > 20) history = history.slice(-20);
 
     var input = $('chatTextInput');
     if (input) input.value = '';
 
     showTyping();
-
     streamChat(text);
   }
 
-  // ----------------------------------------------------------
-  // STREAMING
-  // Reads an NDJSON stream ({type:delta|done|error}). Deltas render
-  // as a plain-text live preview; the final formatted render (markdown,
-  // estimate buttons, quote) happens once from the `done` reply.
-  // ----------------------------------------------------------
-  function cleanPreview(text) {
-    return String(text)
-      // strip the estimate trigger even if wrapped in markdown (##, **, >)
-      .replace(/^[\s#>*_-]*\**\s*Generated Preliminary Estimate\**\s*/i, '')
-      .replace(/\[BUTTONS:[^\]]*\]?/i, '')
-      .replace(/^\s+/, '');
-  }
-
-  function botError(msg) {
-    addMessage('bot', '<p>' + msg + ' Call or text Issam at <a href="tel:' +
-      BUSINESS.tel + '">' + BUSINESS.phone + '</a>.</p>');
-  }
-
   function streamChat(text) {
-    var previewBubble = null;   // live-updating bubble element
-    var acc = '';               // accumulated raw text (for fallback)
-    var finished = false;       // a done/error event was handled
+    var previewBubble = null;
+    var acc = '';
+    var finished = false;
 
     function ensurePreview() {
       if (previewBubble) return;
@@ -340,13 +317,9 @@
       var wrap = addMessage('bot', '', { noTime: true });
       previewBubble = wrap.querySelector('.msg-bubble');
       previewBubble.style.whiteSpace = 'pre-wrap';
-      previewBubble.parentNode.dataset.preview = '1';
     }
-
     function removePreview() {
-      if (previewBubble && previewBubble.parentNode) {
-        previewBubble.parentNode.remove();
-      }
+      if (previewBubble && previewBubble.parentNode) previewBubble.parentNode.remove();
       previewBubble = null;
     }
 
@@ -355,17 +328,20 @@
       if (evt.type === 'delta') {
         ensurePreview();
         acc += evt.text || '';
-        previewBubble.textContent = cleanPreview(acc);
+        previewBubble.textContent = acc;
         scrollDown();
       } else if (evt.type === 'done') {
         finished = true;
         removePreview();
         var reply = evt.reply || acc;
         if (reply && reply.trim()) {
-          handleReply(reply);
+          addMessage('bot', renderMarkdown(reply));
+          history.push({ role: 'assistant', content: reply });
         } else {
           botError('Sorry — something went wrong on my end.');
         }
+        lastQuote = evt.quote || null;
+        renderButtons(evt.buttons);
       } else if (evt.type === 'error') {
         finished = true;
         removePreview();
@@ -374,36 +350,23 @@
       }
     }
 
-    // Parse one NDJSON line and dispatch it. JSON parse failures are skipped
-    // (partial/garbage line); errors thrown INSIDE handleEvent are logged with
-    // a full stack so the calling routine and line are visible — never swallowed.
     function dispatchLine(line) {
       var evt;
-      try {
-        evt = JSON.parse(line);
-      } catch (parseErr) {
-        console.warn('Chat: skipping non-JSON line:', line);
-        return;
-      }
-      try {
-        handleEvent(evt);
-      } catch (handlerErr) {
-        console.error(
-          'Chat: handleEvent threw for event', evt, '\n',
-          handlerErr && handlerErr.stack ? handlerErr.stack : handlerErr
-        );
+      try { evt = JSON.parse(line); }
+      catch (e) { console.warn('Chat: skipping non-JSON line:', line); return; }
+      try { handleEvent(evt); }
+      catch (e) {
+        console.error('Chat: handleEvent threw for event', evt, '\n', e && e.stack ? e.stack : e);
       }
     }
 
-    fetch(CHAT_PROXY_URL, {
+    fetch(CHAT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: text, history: history.slice(0, -1) })
     })
       .then(function (resp) {
-        if (!resp.ok || !resp.body) {
-          throw new Error('HTTP ' + resp.status);
-        }
+        if (!resp.ok || !resp.body) throw new Error('HTTP ' + resp.status);
         var reader = resp.body.getReader();
         var decoder = new TextDecoder();
         var buffer = '';
@@ -411,7 +374,6 @@
         function pump() {
           return reader.read().then(function (result) {
             if (result.done) {
-              // flush any trailing line
               var last = buffer.trim();
               if (last) dispatchLine(last);
               if (!finished) { removePreview(); botError('The connection dropped.'); }
@@ -439,74 +401,18 @@
       });
   }
 
-  // ----------------------------------------------------------
-  // REPLY HANDLING
-  // ----------------------------------------------------------
-  function handleReply(reply) {
-    var trimmed = String(reply).trim();
-
-    // store_quote action from the proxy
-    if (trimmed.charAt(0) === '{') {
-      var parsed = null;
-      try { parsed = JSON.parse(trimmed); } catch (e) { parsed = null; }
-      if (parsed && parsed.action === 'store_quote' && parsed.data) {
-        renderQuote(parsed.data);
-        history.push({ role: 'assistant', content: parsed.data.summary || trimmed });
-        return;
-      }
-    }
-
-    // Pull out [BUTTONS: a | b | c] before rendering
-    var buttons = null;
-    var body = trimmed.replace(/\[BUTTONS:\s*([^\]]+)\]/i, function (_, list) {
-      buttons = list.split('|').map(function (s) { return s.trim(); })
-                    .filter(function (s) { return s.length; });
-      return '';
-    }).trim();
-
-    addMessage('bot', renderMarkdown(body));
-    history.push({ role: 'assistant', content: trimmed });
-
-    if (buttons && buttons.length) {
-      addButtons(buttons, send);
-    }
-  }
-
-  function renderQuote(data) {
-    lastQuote = data;
-
-    addMessage('bot', renderMarkdown(data.summary || ''));
-
-    // Log the structured quote (fire and forget)
-    try {
-      var params = new URLSearchParams({
-        source: 'Chat Quote',
-        total_low: data.total_low || 0,
-        total_high: data.total_high || 0,
-        item_count: data.item_count || 0,
-        below_minimum: data.below_minimum ? 'YES' : 'NO',
-        items: JSON.stringify(data.items || []),
-        summary: (data.summary || '').slice(0, 1500)
-      });
-      fetch(QUOTE_SHEETS_URL + '?' + params.toString()).catch(function () {});
-    } catch (e) { /* non-fatal */ }
-
-    addButtons(
-      ['Email me this quote', 'Download PDF', 'Call Issam'],
-      function (choice) {
-        if (choice === 'Download PDF') downloadQuotePdf(data);
-        else if (choice === 'Call Issam') window.location.href = 'tel:' + BUSINESS.tel;
-        else askForEmail();
-      },
-      'chat-option-quote'
-    );
+  function startNewQuote() {
+    history = [];
+    lastQuote = null;
+    addMessage('bot', '<p>Sure — let’s start fresh. What would you like painted or restored?</p>');
+    renderButtons(STARTER_BUTTONS);
   }
 
   // ----------------------------------------------------------
-  // EMAIL THE QUOTE
+  // EMAIL (quote to customer, or lead to Issam)
   // ----------------------------------------------------------
-  function askForEmail() {
-    addMessage('bot', '<p>What email should I send it to?</p>');
+  function askForEmail(promptText, onSubmit) {
+    addMessage('bot', '<p>' + escapeHtml(promptText) + '</p>');
 
     var row = document.createElement('div');
     row.className = 'chat-options';
@@ -527,9 +433,8 @@
       if (!addr || addr.indexOf('@') < 0) { input.focus(); return; }
       row.remove();
       addMessage('user', escapeHtml(addr));
-      emailQuote(addr);
+      onSubmit(addr);
     }
-
     btn.onclick = go;
     input.onkeydown = function (e) { if (e.key === 'Enter') go(); };
 
@@ -540,53 +445,32 @@
     scrollDown();
   }
 
+  function money(low, high) {
+    return low === high ? '$' + low : '$' + low + ' – $' + high;
+  }
+
+  function quoteLinesText(q) {
+    return (q.line_items || []).map(function (li) {
+      return '  • ' + li.description + ': ' + money(li.low, li.high) +
+        (li.note ? ' (' + li.note + ')' : '');
+    }).join('\n');
+  }
+
   function emailQuote(address) {
     if (!lastQuote) return;
+    var q = lastQuote;
+    var total = money(q.total_low, q.total_high);
 
-    // Build a readable plain-text estimate from the same breakdown shown in
-    // chat (data.summary), rather than the empty items / $0 totals.
-    function stripMd(s) {
-      return String(s)
-        .replace(/\*\*/g, '')
-        .replace(/(^|[^*])\*([^*]+)\*/g, '$1$2')
-        .replace(/`/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-    }
-
-    var srcLines = String(lastQuote.summary || '')
-      .replace(/\[BUTTONS:[^\]]*\]?/ig, '')
-      .replace(/^\s*Would you like[^\n]*$/img, '')
-      .replace(/\r/g, '')
-      .split('\n');
-
-    var out = [];
-    var total = '';
-    srcLines.forEach(function (line) {
-      var t = line.trim();
-      if (!t) { out.push(''); return; }
-      if (/^\|[\s\-:|]+\|?$/.test(t)) return;   // table separator
-      if (/^[-_*]{3,}$/.test(t)) return;         // horizontal rule
-      if (t.charAt(0) === '|') {
-        var cells = splitRow(t).map(stripMd).filter(function (c) { return c.length; });
-        if (cells.length >= 2 && /^item$/i.test(cells[0]) && /^cost$/i.test(cells[1])) return;
-        out.push('  • ' + cells.join(' — '));
-        return;
-      }
-      var clean = stripMd(t.replace(/^#{1,6}\s+/, '').replace(/^[-*•]\s+/, '• '));
-      if (!total && /total/i.test(clean) && clean.indexOf('$') >= 0) {
-        total = clean.slice(clean.indexOf('$')).replace(/[.\s]+$/, '').trim();
-      }
-      out.push(clean);
-    });
-
-    var summaryText = out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+    var extras = '';
+    if (q.minimum_applied) extras += 'Our $350 minimum job charge applies, so the low end reflects that.\n\n';
+    if (q.has_door) extras += 'Door refinishing spans two visits — the enamel needs an overnight cure between coats. The return visit to rehang the door and reinstall the hardware is included.\n\n';
 
     var body =
       'Preliminary estimate from ' + BUSINESS.name + '\n\n' +
-      summaryText + '\n\n' +
-      'This is a preliminary range. The final price is confirmed after Issam sees ' +
-      'the work in person, and it does not change once agreed.\n\n' +
+      quoteLinesText(q) + '\n\n' +
+      'TOTAL: ' + total + '\n\n' +
+      extras +
+      'This is a preliminary range. The final price is confirmed after Issam sees the work in person, and it does not change once agreed.\n\n' +
       BUSINESS.name + ' | ' + BUSINESS.phone + ' | ' + BUSINESS.site;
 
     emailjs.send(EMAILJS_SERVICE, EMAILJS_QUOTE_TEMPLATE, {
@@ -594,7 +478,7 @@
       email: address,
       customer_email: address,
       phone: 'Not provided',
-      service: 'Chat estimate' + (total ? ' — ' + total : ''),
+      service: 'Chat estimate — ' + total,
       message: body
     }).then(function () {
       addMessage('bot', '<p>Sent. Check your inbox — and your spam folder just in case.</p>' +
@@ -607,20 +491,54 @@
     });
   }
 
+  function sendLead(address) {
+    var ctx = '';
+    if (lastQuote) {
+      ctx = 'Preliminary estimate discussed: ' + money(lastQuote.total_low, lastQuote.total_high) + '\n' +
+        quoteLinesText(lastQuote) + '\n\n';
+    }
+    var convo = history.slice(-8).map(function (m) {
+      return (m.role === 'user' ? 'Customer' : 'Assistant') + ': ' + m.content;
+    }).join('\n');
+
+    var body =
+      'A website chat visitor would like you to reach out.\n\n' +
+      'Their email: ' + address + '\n\n' +
+      ctx +
+      'Recent conversation:\n' + convo;
+
+    emailjs.send(EMAILJS_SERVICE, EMAILJS_LEAD_TEMPLATE, {
+      name: 'Website chat visitor',
+      email: address,
+      customer_email: address,
+      phone: 'Not provided',
+      service: 'Chat lead — visitor wants a callback',
+      message: body
+    }).then(function () {
+      addMessage('bot', '<p>Got it — I\'ve passed your details to Issam. He\'ll reach out soon. ' +
+        'You can also call or text him at <a href="tel:' + BUSINESS.tel + '">' + BUSINESS.phone + '</a>.</p>');
+    }).catch(function (err) {
+      console.error('EmailJS lead error:', err);
+      addMessage('bot', '<p>That didn\'t go through — please call or text Issam directly at <a href="tel:' +
+        BUSINESS.tel + '">' + BUSINESS.phone + '</a>.</p>');
+    });
+  }
+
   // ----------------------------------------------------------
-  // PDF
+  // PDF — built entirely from the structured quote (no prose parsing)
   // ----------------------------------------------------------
-  function downloadQuotePdf(data) {
+  function downloadQuotePdf(q) {
     if (!window.jspdf || !window.jspdf.jsPDF) {
-      addMessage('bot', '<p>PDF isn\'t available in this browser - try the email option.</p>');
+      addMessage('bot', '<p>PDF isn\'t available in this browser — try the email option.</p>');
       return;
     }
     var doc = new window.jspdf.jsPDF({ unit: 'pt', format: 'letter' });
-    var M = 56, y = 60, W = 612;
+    var M = 56, y = 60, W = 612, CW = W - M * 2, PAGE_BOTTOM = 740;
+    function ensureSpace(h) { if (y + h > PAGE_BOTTOM) { doc.addPage(); y = 60; } }
 
+    // Letterhead
     doc.setFont('helvetica', 'bold').setFontSize(17).setTextColor(31, 59, 87);
     doc.text(BUSINESS.name.toUpperCase(), M, y);
-
     y += 15;
     doc.setFont('helvetica', 'normal').setFontSize(8.5).setTextColor(107, 114, 128);
     doc.text('Repair & Refinish  |  Greater Orlando, FL', M, y);
@@ -636,125 +554,42 @@
     doc.setDrawColor(31, 59, 87).setLineWidth(2).line(M, y, W - M, y);
     y += 26;
 
-    // ----- Render the estimate breakdown from the summary markdown -----
-    // (Same content shown in chat: headings, line items, bullets, total.)
-    var CW = W - M * 2;             // content width
-    var PAGE_BOTTOM = 740;
+    // Line items
+    (q.line_items || []).forEach(function (li) {
+      var cost = money(li.low, li.high);
+      var desc = li.description + (li.note ? '  (' + li.note + ')' : '');
+      ensureSpace(20);
+      var dl = doc.splitTextToSize(desc, CW - 120);
+      doc.setFont('helvetica', 'normal').setFontSize(10).setTextColor(30, 30, 30).text(dl, M, y);
+      doc.setFont('helvetica', 'bold').setTextColor(46, 92, 63).text(cost, W - M, y, { align: 'right' });
+      y += Math.max(dl.length * 13, 13) + 6;
+      doc.setDrawColor(224, 228, 224).setLineWidth(0.5).line(M, y - 4, W - M, y - 4);
+    });
 
-    function ensureSpace(h) {
-      if (y + h > PAGE_BOTTOM) { doc.addPage(); y = 60; }
-    }
-    function stripInline(s) {
-      return String(s)
-        .replace(/\*\*/g, '')
-        .replace(/(^|[^*])\*([^*]+)\*/g, '$1$2')
-        .replace(/`/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-    }
-
-    // Drop the trailing "download as PDF / email" prompt and any button tokens.
-    var body = String(data.summary || '')
-      .replace(/\[BUTTONS:[^\]]*\]?/ig, '')
-      .replace(/^\s*Would you like[^\n]*$/img, '')
-      .replace(/\r/g, '');
-    var lines = body.split('\n');
-    var i = 0;
-
-    while (i < lines.length) {
-      var t = lines[i].trim();
-      if (!t) { i++; continue; }
-
-      // horizontal rule — skip
-      if (/^[-_*]{3,}$/.test(t)) { i++; continue; }
-
-      // table block -> two-column line items
-      if (t.charAt(0) === '|') {
-        while (i < lines.length && lines[i].trim().charAt(0) === '|') {
-          var rowLine = lines[i].trim();
-          i++;
-          if (/^\|[\s\-:|]+\|?$/.test(rowLine)) continue; // separator
-          var parts = splitRow(rowLine);
-          if (!parts.length) continue;
-          var pDesc = parts[0] || '';
-          var pCost = parts.length > 1 ? parts[parts.length - 1] : '';
-          if (/^item$/i.test(pDesc) && /^cost$/i.test(pCost)) continue; // header
-          ensureSpace(20);
-          var dl = doc.splitTextToSize(stripInline(pDesc), CW - 120);
-          doc.setFont('helvetica', 'normal').setFontSize(10).setTextColor(30, 30, 30).text(dl, M, y);
-          if (pCost) {
-            doc.setFont('helvetica', 'bold').setTextColor(46, 92, 63).text(stripInline(pCost), W - M, y, { align: 'right' });
-          }
-          y += Math.max(dl.length * 13, 13) + 6;
-          doc.setDrawColor(224, 228, 224).setLineWidth(0.5).line(M, y - 4, W - M, y - 4);
-        }
-        continue;
-      }
-
-      // total line -> highlighted box (checked before headings)
-      var stripped = stripInline(t);
-      if (/^(estimated |grand |project |total\b)/i.test(stripped) &&
-          /total/i.test(stripped) && stripped.indexOf('$') >= 0) {
-        var totalStr = stripped.slice(stripped.indexOf('$')).replace(/[.\s]+$/, '').trim();
-        ensureSpace(44);
-        y += 6;
-        doc.setFillColor(31, 59, 87).rect(M, y, CW, 30, 'F');
-        doc.setFont('helvetica', 'bold').setFontSize(11).setTextColor(255, 255, 255).text('TOTAL', M + 12, y + 20);
-        doc.setFontSize(13).text(totalStr, W - M - 12, y + 20, { align: 'right' });
-        y += 46;
-        i++;
-        continue;
-      }
-
-      // heading: "# ..." or a standalone bold line
-      if (/^#{1,6}\s+/.test(t) || /^\*\*[^*]+\*\*:?$/.test(t)) {
-        ensureSpace(22);
-        y += 6;
-        var htext = stripInline(t.replace(/^#{1,6}\s+/, ''));
-        var hl = doc.splitTextToSize(htext, CW);
-        doc.setFont('helvetica', 'bold').setFontSize(11).setTextColor(31, 59, 87).text(hl, M, y);
-        y += hl.length * 14 + 4;
-        i++;
-        continue;
-      }
-
-      // bullet
-      if (/^[-*•]\s+/.test(t)) {
-        ensureSpace(15);
-        var bl = doc.splitTextToSize('•  ' + stripInline(t.replace(/^[-*•]\s+/, '')), CW - 8);
-        doc.setFont('helvetica', 'normal').setFontSize(10).setTextColor(40, 40, 40).text(bl, M + 6, y);
-        y += bl.length * 13 + 3;
-        i++;
-        continue;
-      }
-
-      // paragraph — collect until a structural line
-      var para = [];
-      while (i < lines.length) {
-        var pl = lines[i].trim();
-        if (!pl || pl.charAt(0) === '|' || /^[-*•]\s+/.test(pl) ||
-            /^#{1,6}\s+/.test(pl) || /^\*\*[^*]+\*\*:?$/.test(pl) ||
-            /^[-_*]{3,}$/.test(pl)) break;
-        para.push(pl); i++;
-      }
-      if (para.length) {
-        ensureSpace(15);
-        var pl2 = doc.splitTextToSize(stripInline(para.join(' ')), CW);
-        doc.setFont('helvetica', 'normal').setFontSize(10).setTextColor(40, 40, 40).text(pl2, M, y);
-        y += pl2.length * 13 + 6;
-      }
-    }
-
+    // Total box
     y += 8;
-    ensureSpace(60);
-    doc.setFont('helvetica', 'italic').setFontSize(8.5).setTextColor(107, 114, 128);
-    var note = doc.splitTextToSize(
-      'Preliminary range based on the information provided in chat. The final price is confirmed ' +
-      'after Issam sees the work in person, and it does not change once agreed. ' +
-      'Minimum job charge $350. Estimate valid 30 days.', W - M * 2);
-    doc.text(note, M, y);
-    y += note.length * 11 + 16;
+    ensureSpace(44);
+    doc.setFillColor(31, 59, 87).rect(M, y, CW, 30, 'F');
+    doc.setFont('helvetica', 'bold').setFontSize(11).setTextColor(255, 255, 255).text('TOTAL', M + 12, y + 20);
+    doc.setFontSize(13).text(money(q.total_low, q.total_high), W - M - 12, y + 20, { align: 'right' });
+    y += 46;
 
+    // Notes
+    var notes = [];
+    if (q.minimum_applied) notes.push('Our $350 minimum job charge applies, so the low end reflects that.');
+    if (q.has_door) notes.push('Door refinishing spans two visits — the enamel needs an overnight cure between coats. The return visit to rehang the door and reinstall the hardware is included.');
+    notes.push('Preliminary range based on the information provided in chat. The final price is confirmed after Issam sees the work in person, and it does not change once agreed. Estimate valid 30 days.');
+
+    doc.setFont('helvetica', 'italic').setFontSize(8.5).setTextColor(107, 114, 128);
+    notes.forEach(function (n) {
+      ensureSpace(28);
+      var nl = doc.splitTextToSize(n, CW);
+      doc.text(nl, M, y);
+      y += nl.length * 11 + 8;
+    });
+
+    y += 4;
+    ensureSpace(20);
     doc.setFont('helvetica', 'normal').setFontSize(9).setTextColor(0, 0, 0);
     doc.text('Questions? Call or text ' + BUSINESS.phone + '  |  ' + BUSINESS.site, M, y);
 
@@ -789,7 +624,7 @@
   }
 
   // ----------------------------------------------------------
-  // OPEN / CLOSE  (global - index.html calls these inline)
+  // OPEN / CLOSE  (global — index.html calls these inline)
   // ----------------------------------------------------------
   window.openChat = function () {
     $('chatPopup').classList.add('active');
@@ -799,7 +634,7 @@
     if (!started) {
       started = true;
       addMessage('bot', '<p>' + escapeHtml(GREETING) + '</p>');
-      addButtons(STARTERS, send);
+      renderButtons(STARTER_BUTTONS);
     }
     var inp = $('chatTextInput');
     if (inp && window.innerWidth > 480) inp.focus();
