@@ -41,6 +41,13 @@
   };
 
   var GREETING = "Hi! I can put together a quick estimate right here, or answer questions about the work. What are you looking to have done?";
+  // Instant acknowledgment shown while the reply is being prepared (before it streams).
+  var ACK_LINES = [
+    'One sec — putting that together…',
+    'Got it — let me take a look…',
+    'Sure — one moment…',
+    'On it — just a sec…'
+  ];
   var STARTER_BUTTONS = [
     { label: 'Interior painting', action: 'reply' },
     { label: 'Door restoration', action: 'reply' },
@@ -277,7 +284,12 @@
     var w = document.createElement('div');
     w.className = 'msg bot';
     w.id = 'typingIndicator';
-    w.innerHTML = '<div class="typing"><span></span><span></span><span></span></div>';
+    var ack = ACK_LINES[Math.floor(Math.random() * ACK_LINES.length)];
+    w.innerHTML =
+      '<div class="msg-bubble" style="display:inline-flex;align-items:center;gap:10px;">' +
+      '<span style="color:var(--mid);">' + escapeHtml(ack) + '</span>' +
+      '<span class="typing"><span></span><span></span><span></span></span>' +
+      '</div>';
     $('chatMessages').appendChild(w);
     scrollDown();
   }
