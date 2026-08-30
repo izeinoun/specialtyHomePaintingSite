@@ -27,6 +27,10 @@
   var EMAILJS_QUOTE_TEMPLATE = 'template_66n8bpb'; // quote -> customer (To={{email}}), Bcc business
   var EMAILJS_LEAD_TEMPLATE  = 'template_yrs9zfk';  // lead  -> business (contact template)
 
+  // EmailJS free plan drops Cc/Bcc, so we send a separate copy of every chat
+  // email straight to the owner's inbox (reuses the quote template's To={{email}}).
+  var OWNER_COPY_EMAIL = 'izeinoun@gmail.com';
+
   var BUSINESS = {
     name:  'Specialty Home Painting',
     phone: '(904) 514-7016',
@@ -458,6 +462,22 @@
     }).join('\n\n');
   }
 
+  // Send a copy of a chat email to the owner's inbox (works around EmailJS
+  // free-plan Cc/Bcc being dropped). Fire-and-forget.
+  function emailCopyToOwner(serviceLabel, body) {
+    if (!OWNER_COPY_EMAIL) return;
+    try {
+      emailjs.send(EMAILJS_SERVICE, EMAILJS_QUOTE_TEMPLATE, {
+        name: 'Owner copy',
+        email: OWNER_COPY_EMAIL,
+        customer_email: OWNER_COPY_EMAIL,
+        phone: 'Not provided',
+        service: serviceLabel,
+        message: '[Copy for your records]\n\n' + body
+      }).catch(function () {});
+    } catch (e) { /* non-fatal */ }
+  }
+
   // Fire-and-forget: tell the server to text Issam that an email went out.
   // Server sends the SMS via Telnyx (dormant until configured in Railway).
   function notifySms(kind, to, total) {
@@ -497,6 +517,7 @@
       message: body
     }).then(function () {
       notifySms('quote', address, total);
+      emailCopyToOwner('Chat estimate — ' + total, body);
       addMessage('bot', '<p>Sent. Check your inbox — and your spam folder just in case.</p>' +
         '<p>Issam will follow up shortly. You can reach him directly at <a href="tel:' +
         BUSINESS.tel + '">' + BUSINESS.phone + '</a>.</p>');
@@ -532,6 +553,7 @@
       message: body
     }).then(function () {
       notifySms('lead', address, lastQuote ? money(lastQuote.total_low, lastQuote.total_high) : '');
+      emailCopyToOwner('Chat lead — callback request', body);
       addMessage('bot', '<p>Got it — I\'ve passed your details to Issam. He\'ll reach out soon. ' +
         'You can also call or text him at <a href="tel:' + BUSINESS.tel + '">' + BUSINESS.phone + '</a>.</p>');
     }).catch(function (err) {
