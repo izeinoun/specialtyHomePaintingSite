@@ -8,6 +8,7 @@ import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Anthropic from '@anthropic-ai/sdk';
+import { renderFaqPage } from './knowledge.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -155,6 +156,17 @@ function processReply(reply) {
 
 // Health check (used by Railway + uptime checks)
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
+
+// Public FAQ page — rendered from content/faqs.md (single source of truth,
+// shared with the chatbot's answer layer). Edit the markdown + redeploy.
+app.get('/faqs', (_req, res) => {
+  try {
+    res.set('Cache-Control', 'no-cache').type('html').send(renderFaqPage());
+  } catch (err) {
+    console.error('FAQ render error:', err);
+    res.status(500).type('text').send('FAQ page unavailable.');
+  }
+});
 
 app.use(express.json({ limit: '256kb' }));
 
