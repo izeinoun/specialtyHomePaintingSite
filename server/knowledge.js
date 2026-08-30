@@ -220,6 +220,8 @@ export function renderFaqPage() {
     <li><a href="/faqs" class="current">FAQ</a></li>
     <li><a href="/index.html#gallery">Gallery</a></li>
     <li><a href="/lessons.html">Lessons</a></li>
+    <li><a href="/index.html#process">Process</a></li>
+    <li><a href="/index.html#property-managers">Property Managers</a></li>
     <li><a href="/index.html#contact" class="nav-cta">Get a free estimate</a></li>
   </ul>
 </nav>
