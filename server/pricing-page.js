@@ -16,6 +16,7 @@ import {
   WINDOW_RATES,
   RAILING_RATES,
 } from './pricing.js';
+import { BUSINESS_LD_SCRIPT } from './business-schema.js';
 
 const fmt = (n) => '$' + Number(n).toLocaleString('en-US');
 const money = (low, high) => (low === high ? fmt(low) : fmt(low) + '–' + fmt(high));
@@ -348,6 +349,7 @@ export function renderPricingPage() {
   </div>
 </footer>
 
+${BUSINESS_LD_SCRIPT}
 <script type="application/ld+json">
 ${jsonLd}
 </script>
